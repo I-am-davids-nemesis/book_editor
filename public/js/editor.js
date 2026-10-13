@@ -21,6 +21,13 @@ const markdownStyle = HighlightStyle.define([
   { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator], color: 'var(--md-mark)' },
 ]);
 
+// Set through CodeMirror's theme so it takes precedence over its base styles
+// (always-visible vertical scrollbar, prose font).
+const proseTheme = EditorView.theme({
+  '&': { height: '100%' },
+  '.cm-scroller': { overflowY: 'scroll', fontFamily: 'var(--prose-font)', fontSize: '17px', lineHeight: '1.7' },
+});
+
 // One CodeMirror view, reused for every file. Opening a file swaps in a fresh
 // state, so undo history never leaks between files.
 export class Editor {
@@ -36,6 +43,7 @@ export class Editor {
       markdown(),
       syntaxHighlighting(markdownStyle),
       EditorView.lineWrapping,
+      proseTheme,
       EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
       keymap.of([
         { key: 'Mod-s', preventDefault: true, run: () => { this.onSave(); return true; } },

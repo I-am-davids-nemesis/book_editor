@@ -3,6 +3,10 @@
   --surface: #ffffff;
   --sidebar: #f3f1ec;
   --border: #e2ded5;
+  --divider: #b9b1a2;
+  --scroll-track: #ece8e0;
+  --scroll-thumb: #a39b8c;
+  --scroll-thumb-hover: #7d7568;
   --text: #2a2723;
   --muted: #7a746a;
   --accent: #8a4b1f;
@@ -26,6 +30,14 @@
     --surface: #23211f;
     --sidebar: #191816;
     --border: #36332f;
+  --divider: #5a554d;
+  --scroll-track: #2a2825;
+  --scroll-thumb: #625c53;
+  --scroll-thumb-hover: #807869;
+    --divider: #5a554d;
+    --scroll-track: #2a2825;
+    --scroll-thumb: #625c53;
+    --scroll-thumb-hover: #807869;
     --text: #e8e3da;
     --muted: #9a9387;
     --accent: #e0a46e;
@@ -61,6 +73,25 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Elements with display set in CSS would otherwise ignore the hidden attribute. */
+[hidden] { display: none !important; }
+
+/* Always-visible scrollbars. Styling ::-webkit-scrollbar turns off macOS's
+   auto-hiding overlay bars in Chrome and Safari. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--scroll-track); }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 6px;
+  border: 2px solid var(--scroll-track);
+  min-height: 32px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+::-webkit-scrollbar-corner { background: var(--scroll-track); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
+}
 
 html, body { height: 100%; }
 
@@ -104,7 +135,7 @@ input[type="text"] {
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--divider);
   background: var(--surface);
   flex: none;
 }
@@ -115,7 +146,7 @@ input[type="text"] {
 
 /* ---- library ---- */
 
-.library { flex: 1; overflow: auto; padding: 24px 16px; }
+.library { flex: 1; overflow-y: scroll; padding: 24px 16px; }
 .library-inner { max-width: 880px; margin: 0 auto; }
 .library h1 { font: 600 22px var(--prose-font); margin: 0 0 4px; }
 .library .sub { color: var(--muted); margin: 0 0 20px; }
@@ -151,10 +182,10 @@ input[type="text"] {
   display: flex;
   flex-direction: column;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-right: 2px solid var(--divider);
   min-height: 0;
 }
-.tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
+.tabs { display: flex; border-bottom: 1px solid var(--divider); flex: none; }
 .tabs button {
   flex: 1;
   border: none;
@@ -165,8 +196,8 @@ input[type="text"] {
   border-bottom: 2px solid transparent;
 }
 .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-.tree { flex: 1; overflow: auto; padding: 6px 0 16px; }
-.sidebar-foot { flex: none; padding: 6px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.tree { flex: 1; overflow-y: scroll; overflow-x: hidden; padding: 6px 0 16px; }
+.sidebar-foot { flex: none; padding: 6px 12px; border-top: 1px solid var(--divider); color: var(--muted); font-size: 12px; }
 
 .group > summary {
   list-style: none;
@@ -211,7 +242,8 @@ input[type="text"] {
   align-items: center;
   gap: 10px;
   padding: 6px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--divider);
+  background: var(--sidebar);
   min-height: 39px;
 }
 .editor-head .file-title { font-weight: 600; }
@@ -233,7 +265,6 @@ input[type="text"] {
 .editor-host { flex: 1; min-height: 0; overflow: hidden; }
 .editor-host .cm-editor { height: 100%; background: var(--surface); color: var(--text); }
 .editor-host .cm-editor.cm-focused { outline: none; }
-.editor-host .cm-scroller { font: 17px/1.7 var(--prose-font); }
 .editor-host .cm-content { max-width: 72ch; margin: 0 auto; padding: 32px 24px 40vh; caret-color: var(--accent); }
 .editor-host .cm-cursor { border-left-color: var(--accent); }
 .editor-host .cm-selectionBackground,
@@ -249,7 +280,8 @@ input[type="text"] {
   display: flex;
   gap: 16px;
   padding: 4px 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--divider);
+  background: var(--sidebar);
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -273,6 +305,6 @@ input[type="text"] {
 
 @media (max-width: 720px) {
   .book { flex-direction: column; }
-  .sidebar { width: auto; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar { width: auto; max-height: 40vh; border-right: none; border-bottom: 2px solid var(--divider); }
   .editor-host .cm-content { padding: 20px 16px 40vh; }
 }
