@@ -29,4 +29,22 @@ export const api = {
   readFile: (id, path) => request('GET', `${book(id)}/file?path=${encodeURIComponent(path)}`),
   writeFile: (id, path, content, baseHash, force = false) =>
     request('PUT', `${book(id)}/file`, { path, content, baseHash, force }),
+
+  createBook: (title, remote) => request('POST', '/api/books', { title, remote }),
+
+  addChapter: (id, title, position) => request('POST', `${book(id)}/chapters`, { title, position }),
+  renameChapter: (id, chapter, title) => request('PATCH', `${book(id)}/chapters/${encodeURIComponent(chapter)}`, { title }),
+  deleteChapter: (id, chapter) => request('DELETE', `${book(id)}/chapters/${encodeURIComponent(chapter)}`),
+  addScene: (id, chapter, title, position) =>
+    request('POST', `${book(id)}/chapters/${encodeURIComponent(chapter)}/scenes`, { title, position }),
+  renameScene: (id, chapter, scene, title) =>
+    request('PATCH', `${book(id)}/chapters/${encodeURIComponent(chapter)}/scenes/${encodeURIComponent(scene)}`, { title }),
+  deleteScene: (id, chapter, scene) =>
+    request('DELETE', `${book(id)}/chapters/${encodeURIComponent(chapter)}/scenes/${encodeURIComponent(scene)}`),
+  reorder: (id, chapter, order) => request('POST', `${book(id)}/reorder`, { chapter, order }),
+  createMissing: (id, path) => request('POST', `${book(id)}/create-missing`, { path }),
+
+  addCodex: (id, kind, name) => request('POST', `${book(id)}/codex`, { kind, name }),
+  renameCodex: (id, path, name) => request('PATCH', `${book(id)}/codex`, { path, name }),
+  deleteCodex: (id, path) => request('DELETE', `${book(id)}/codex?path=${encodeURIComponent(path)}`),
 };

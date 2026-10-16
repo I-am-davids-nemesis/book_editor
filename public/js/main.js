@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
 import { Editor } from './editor.js';
 import { renderLibrary } from './library.js';
 import { renderTree, tabForPath } from './tree.js';
@@ -80,7 +81,7 @@ class BookView {
   }
 
   renderTree() {
-    renderTree(this.treeEl, this.tree, { id: this.id, tab: this.tab, activePath: this.file?.path });
+    renderTree(this.treeEl, this.tree, { id: this.id, tab: this.tab, activePath: this.file?.path, actions: this.actions });
     this.totalEl.textContent = `${formatCount(this.tree.words)} words in the manuscript`;
   }
 
@@ -96,10 +97,15 @@ class BookView {
     this.hideBanner();
     this.hostEl.hidden = false;
     this.placeholderEl.hidden = true;
-    this.titleEl.textContent = file.path.split('/').pop().replace(/\.md$/i, '');
-    this.pathEl.textContent = file.path;
+    this.showFileHeader();
     this.updateStatus();
     this.editor.focus();
+  }
+
+  showFileHeader() {
+    const path = this.file?.path ?? '';
+    this.titleEl.textContent = path.split('/').pop().replace(/\.md$/i, '');
+    this.pathEl.textContent = path;
   }
 
   closeFile() {
@@ -108,8 +114,7 @@ class BookView {
     this.hideBanner();
     this.hostEl.hidden = true;
     this.placeholderEl.hidden = false;
-    this.titleEl.textContent = '';
-    this.pathEl.textContent = '';
+    this.showFileHeader();
     this.updateStatus();
   }
 
@@ -156,6 +161,153 @@ class BookView {
       }
     })();
     return this.saving;
+  }
+
+  // --- structure changes ------------------------------------------------------
+
+  // Saves the open file, runs a structure change, then follows the open file
+  // if it moved (or closes it if it was deleted) and refreshes the tree.
+  async runOp(fn) {
+    if (this.dirty && !(await this.save())) return null;
+    let res;
+    try {
+      res = await fn();
+    } catch (err) {
+      toast(err.message, { error: true });
+      await this.refreshTree().catch(() => {});
+      return null;
+    }
+    this.followChanges(res);
+    await this.refreshTree();
+    return res;
+  }
+
+  followChanges({ moves = [], deleted = [] }) {
+    const p = this.file?.path;
+    if (!p) return;
+    const under = (base) => p === base || p.startsWith(`${base}/`);
+    if (deleted.some(under)) {
+      this.closeFile();
+      history.replaceState(null, '', bookHref(this.id, this.tab));
+      return;
+    }
+    const m = moves.find((mv) => under(mv.from));
+    if (m) {
+      this.file.path = m.to + p.slice(m.from.length);
+      this.showFileHeader();
+      history.replaceState(null, '', bookHref(this.id, this.tab, this.file.path));
+    }
+  }
+
+  open(tab, path) {
+    location.hash = bookHref(this.id, tab, path);
+  }
+
+  get actions() {
+    const id = this.id;
+    const positionField = (entries, noun) => ({
+      name: 'position',
+      label: 'Position',
+      type: 'select',
+      value: '',
+      options: [
+        { value: '', label: 'At the end' },
+        ...(entries.length ? [{ value: '1', label: 'At the start' }] : []),
+        ...entries.slice(0, -1).map((e, i) => ({ value: String(i + 2), label: `After “${e.title}”` })),
+      ],
+      hint: `Later ${noun} are renumbered to make room.`,
+    });
+
+    return {
+      addChapter: async () => {
+        const v = await formDialog({
+          title: 'New chapter',
+          okLabel: 'Add chapter',
+          fields: [
+            { name: 'title', label: 'Title', required: true, placeholder: 'The Washing House' },
+            positionField(this.tree.chapters, 'chapters'),
+          ],
+        });
+        if (!v) return;
+        const res = await this.runOp(() => api.addChapter(id, v.title, v.position || undefined));
+        if (res && this.tab === 'outline') this.open('outline', `outline/${res.chapter}/_chapter.md`);
+        else if (res) toast(`Added ${res.chapter}`);
+      },
+
+      addScene: async (ch) => {
+        const v = await formDialog({
+          title: `New scene in “${ch.title}”`,
+          message: 'Creates the scene file and its plot file in outline/.',
+          okLabel: 'Add scene',
+          fields: [
+            { name: 'title', label: 'Title', required: true, placeholder: 'Dorgal arrives' },
+            positionField(ch.scenes, 'scenes'),
+          ],
+        });
+        if (!v) return;
+        const res = await this.runOp(() => api.addScene(id, ch.name, v.title, v.position || undefined));
+        if (!res) return;
+        const tab = this.tab === 'outline' ? 'outline' : 'manuscript';
+        this.open(tab, `${tab}/${ch.name}/${res.scene}`);
+      },
+
+      renameChapter: async (ch) => {
+        const title = await promptDialog({ title: 'Rename chapter', label: 'Title', value: ch.title, okLabel: 'Rename', hint: 'The folder keeps its number; only the name changes.' });
+        if (title) await this.runOp(() => api.renameChapter(id, ch.name, title));
+      },
+
+      deleteChapter: async (ch) => {
+        const n = ch.scenes.length;
+        const ok = await confirmDialog({
+          title: `Delete “${ch.title}”?`,
+          message: `This deletes manuscript/${ch.name} and outline/${ch.name}, with ${n} scene${n === 1 ? '' : 's'} and their plot files. Later chapters are renumbered. Anything already committed can be restored from git history.`,
+          okLabel: 'Delete chapter',
+          danger: true,
+        });
+        if (ok) await this.runOp(() => api.deleteChapter(id, ch.name));
+      },
+
+      renameScene: async (ch, s) => {
+        const title = await promptDialog({ title: 'Rename scene', label: 'Title', value: s.title, okLabel: 'Rename', hint: 'Renames the scene file, its plot file and any variants. The number stays.' });
+        if (title) await this.runOp(() => api.renameScene(id, ch.name, s.name, title));
+      },
+
+      deleteScene: async (ch, s) => {
+        const extra = s.variants.length ? `, its ${s.variants.length} variant${s.variants.length === 1 ? '' : 's'}` : '';
+        const ok = await confirmDialog({
+          title: `Delete “${s.title}”?`,
+          message: `This deletes the scene file, its plot file${extra}. Later scenes are renumbered. Anything already committed can be restored from git history.`,
+          okLabel: 'Delete scene',
+          danger: true,
+        });
+        if (ok) await this.runOp(() => api.deleteScene(id, ch.name, s.name));
+      },
+
+      reorder: (chapter, order) => this.runOp(() => api.reorder(id, chapter || undefined, order)),
+
+      createMissing: async (path) => {
+        const res = await this.runOp(() => api.createMissing(id, path));
+        if (res) this.open(path.startsWith('outline/') ? 'outline' : 'manuscript', path);
+      },
+
+      addCodex: async (kind) => {
+        const labels = { character: 'character', location: 'location', note: 'note' };
+        const name = await promptDialog({ title: `New ${labels[kind]}`, label: 'Name', okLabel: 'Add', hint: kind === 'note' ? 'Created as a free-form note in codex/.' : 'Created from the template in codex/_templates/.' });
+        if (!name) return;
+        const res = await this.runOp(() => api.addCodex(id, kind, name));
+        if (res) this.open('codex', res.path);
+      },
+
+      renameCodex: async (entry) => {
+        const name = await promptDialog({ title: 'Rename', label: 'Name', value: entry.title, okLabel: 'Rename', hint: 'Renames the file. Update the heading inside yourself.' });
+        if (name) await this.runOp(() => api.renameCodex(id, entry.path, name));
+      },
+
+      deleteCodex: async (entry) => {
+        const ok = await confirmDialog({ title: `Delete “${entry.title}”?`, message: `This deletes ${entry.path}. If it was committed, it can be restored from git history.`, okLabel: 'Delete', danger: true });
+        if (ok) await this.runOp(() => api.deleteCodex(id, entry.path));
+      },
+    };
   }
 
   showConflict(data) {

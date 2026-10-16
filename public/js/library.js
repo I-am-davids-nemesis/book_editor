@@ -1,5 +1,6 @@
 import { api } from './api.js';
-import { bookHref, h } from './ui.js';
+import { confirmDialog, formDialog } from './dialogs.js';
+import { bookHref, h, toast } from './ui.js';
 
 function bookCard(book, onForget) {
   const tags = [];
@@ -34,13 +35,38 @@ export async function renderLibrary(root) {
     const { libraryRoot, books } = await api.listBooks();
     sub.textContent = `Library folder: ${libraryRoot}`;
     grid.replaceChildren(...books.map((b) => bookCard(b, forget)));
-    if (!books.length) grid.replaceChildren(h('div', { class: 'empty' }, 'No books yet. Open an existing folder below.'));
+    if (!books.length) grid.replaceChildren(h('div', { class: 'empty' }, 'No books yet. Create one, or open an existing folder below.'));
   }
 
   async function forget(book) {
-    if (!confirm(`Remove “${book.title}” from the list? The folder on disk is not touched.`)) return;
+    const ok = await confirmDialog({
+      title: `Remove “${book.title}” from the list?`,
+      message: `The folder ${book.path} is not touched; you can open it again later.`,
+      okLabel: 'Remove',
+    });
+    if (!ok) return;
     await api.forgetBook(book.id);
     await refresh();
+  }
+
+  async function newBook() {
+    const v = await formDialog({
+      title: 'New book',
+      message: 'Creates a folder in your library with manuscript/, outline/ and codex/, starts a git repository and makes the first commit.',
+      okLabel: 'Create book',
+      fields: [
+        { name: 'title', label: 'Title', required: true, placeholder: 'The Builder' },
+        { name: 'remote', label: 'Git remote (optional)', placeholder: 'git@github.com:you/book.git', hint: 'Added as “origin”. Nothing is pushed.' },
+      ],
+    });
+    if (!v) return;
+    try {
+      const book = await api.createBook(v.title, v.remote);
+      for (const w of book.warnings || []) toast(w, { error: true, ms: 8000 });
+      location.hash = bookHref(book.id);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
   }
 
   async function open(e) {
@@ -55,7 +81,9 @@ export async function renderLibrary(root) {
   }
 
   root.replaceChildren(h('div', { class: 'library' }, h('div', { class: 'library-inner' },
-    h('h1', {}, 'Books'),
+    h('div', { class: 'library-head' },
+      h('h1', {}, 'Books'),
+      h('button', { type: 'button', class: 'primary', onclick: newBook }, '+ New book')),
     sub,
     grid,
     h('form', { class: 'open-folder', onsubmit: open },

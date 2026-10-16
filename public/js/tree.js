@@ -1,88 +1,226 @@
-import { bookHref, formatCount, h } from './ui.js';
+import { bookHref, formatCount, h, showMenu } from './ui.js';
 
-// Renders one sidebar tab from the server's tree. Every entry is a link, so
-// opening a file is just navigation.
+// Renders one sidebar tab from the server's tree. Opening a file is a link
+// (navigation); everything that changes the book goes through `actions`,
+// which main.js supplies:
+//   addChapter(), addScene(ch), renameChapter(ch), deleteChapter(ch),
+//   renameScene(ch, scene), deleteScene(ch, scene), reorder(chapterName|null, names),
+//   createMissing(path), addCodex(kind), renameCodex(entry), deleteCodex(entry)
 
-function item({ id, tab, path, title, words, badges = [], active, missing }) {
-  const attrs = {
-    class: `item${active ? ' active' : ''}${missing ? ' missing' : ''}`,
-    href: missing ? null : bookHref(id, tab, path),
-    title: path,
-    'data-path': path,
-  };
-  return h('a', attrs,
+function moreButton(label, items) {
+  return h('button', {
+    type: 'button',
+    class: 'more',
+    title: label,
+    'aria-label': label,
+    'aria-haspopup': 'menu',
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showMenu(e.currentTarget, items());
+    },
+  }, '⋯');
+}
+
+function row({ id, tab, path, title, words, badges = [], active, missing, onCreate, menu, drag }) {
+  const content = [
     h('span', { class: 'title' }, title),
     badges.map((b) => h('span', { class: 'badge', title: b.hint }, b.text)),
-    words !== undefined ? h('span', { class: 'count' }, formatCount(words)) : null);
+    words !== undefined ? h('span', { class: 'count' }, formatCount(words)) : null,
+  ];
+  const main = missing
+    ? h('span', { class: 'row-main', title: `${path} does not exist` }, content)
+    : h('a', { class: 'row-main', href: bookHref(id, tab, path), title: path, draggable: 'false' }, content);
+  const el = h('div', { class: `item${active ? ' active' : ''}${missing ? ' missing' : ''}`, 'data-path': path },
+    main,
+    missing && onCreate ? h('button', { type: 'button', class: 'create', title: `Create ${path}`, onclick: onCreate }, 'Create') : null,
+    menu ? moreButton(`Actions for ${title}`, menu) : null);
+  if (drag) makeDraggable(el, drag);
+  return el;
 }
 
-function chapterGroup(ch, children) {
+// --- drag to reorder ---------------------------------------------------------
+// A drag carries { group, name }; it can only drop onto rows of the same group
+// (the chapter list, or the scenes of one chapter).
+
+let dragging = null;
+
+function makeDraggable(el, { group, name, names, onDrop }) {
+  el.draggable = true;
+  el.addEventListener('dragstart', (e) => {
+    dragging = { group, name };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', name);
+    el.classList.add('dragging');
+    e.stopPropagation();
+  });
+  el.addEventListener('dragend', () => {
+    dragging = null;
+    el.classList.remove('dragging');
+    clearDropMarks();
+  });
+  el.addEventListener('dragover', (e) => {
+    if (!dragging || dragging.group !== group || dragging.name === name) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const r = el.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    clearDropMarks();
+    el.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after'));
+  el.addEventListener('drop', (e) => {
+    if (!dragging || dragging.group !== group || dragging.name === name) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const after = el.classList.contains('drop-after');
+    const moved = dragging.name;
+    clearDropMarks();
+    const order = names.filter((n) => n !== moved);
+    order.splice(order.indexOf(name) + (after ? 1 : 0), 0, moved);
+    if (order.join('/') !== names.join('/')) onDrop(order);
+  });
+}
+
+function clearDropMarks() {
+  for (const el of document.querySelectorAll('.drop-before, .drop-after')) el.classList.remove('drop-before', 'drop-after');
+}
+
+function moveItems(names, name, onReorder) {
+  const i = names.indexOf(name);
+  const swap = (j) => {
+    const order = [...names];
+    [order[i], order[j]] = [order[j], order[i]];
+    onReorder(order);
+  };
+  return [
+    { label: 'Move up', disabled: i <= 0, onclick: () => swap(i - 1) },
+    { label: 'Move down', disabled: i >= names.length - 1, onclick: () => swap(i + 1) },
+  ];
+}
+
+// --- manuscript and outline tabs --------------------------------------------
+
+function toolbar(...buttons) {
+  return h('div', { class: 'tree-toolbar' }, buttons);
+}
+
+function addButton(label, title, onclick) {
+  return h('button', {
+    type: 'button',
+    class: 'add',
+    title,
+    onclick: (e) => { e.preventDefault(); e.stopPropagation(); onclick(); },
+  }, label);
+}
+
+function chapterGroup(ctx, ch, children) {
+  const { tab, actions, chapterNames } = ctx;
+  const sceneLabel = tab === 'outline' ? '+ Scene summary' : '+ Scene';
+  const summary = h('summary', {},
+    h('span', { class: 'chapter-title' }, ch.title),
+    h('span', { class: 'count' }, tab === 'manuscript' ? formatCount(ch.words) : ''),
+    addButton(sceneLabel, 'Add a scene to this chapter (creates the scene file and its plot file)', () => actions.addScene(ch)),
+    moreButton(`Actions for chapter ${ch.title}`, () => [
+      { label: sceneLabel, onclick: () => actions.addScene(ch) },
+      null,
+      { label: 'Rename chapter…', onclick: () => actions.renameChapter(ch) },
+      ...moveItems(chapterNames, ch.name, (order) => actions.reorder(null, order)),
+      null,
+      { label: 'Delete chapter…', danger: true, onclick: () => actions.deleteChapter(ch) },
+    ]));
+  const group = h('details', { class: 'group chapter', open: true, 'data-chapter': ch.name }, summary, children);
+  makeDraggable(summary, {
+    group: 'chapters',
+    name: ch.name,
+    names: chapterNames,
+    onDrop: (order) => actions.reorder(null, order),
+  });
+  return group;
+}
+
+function sceneRow(ctx, ch, s) {
+  const { id, tab, activePath, actions } = ctx;
+  const inThisTab = tab === 'outline' ? s.inOutline : s.inManuscript;
+  const path = tab === 'outline' ? s.outlinePath : s.manuscriptPath;
+  const otherPath = tab === 'outline' ? s.manuscriptPath : s.outlinePath;
+  const otherExists = tab === 'outline' ? s.inManuscript : s.inOutline;
+  const names = ch.scenes.map((x) => x.name);
+
   const badges = [];
-  if (!ch.inManuscript) badges.push(h('span', { class: 'badge', title: 'No folder in manuscript/' }, 'no manuscript'));
-  if (!ch.inOutline) badges.push(h('span', { class: 'badge', title: 'No folder in outline/' }, 'no outline'));
-  return h('details', { class: 'group', open: true, 'data-chapter': ch.name },
-    h('summary', {}, h('span', {}, ch.title), badges, h('span', { class: 'count' }, formatCount(ch.words))),
-    children);
+  if (tab === 'manuscript') {
+    if (s.inManuscript && !s.inOutline) badges.push({ text: 'no plot', hint: 'No matching file in outline/' });
+    if (s.variants.length) badges.push({ text: `+${s.variants.length} variant`, hint: s.variants.map((v) => v.name).join(', ') });
+  } else if (s.inOutline && !s.inManuscript) {
+    badges.push({ text: 'no scene', hint: 'No matching file in manuscript/' });
+  }
+
+  return row({
+    id,
+    tab,
+    path,
+    title: s.title,
+    words: tab === 'manuscript' && s.inManuscript ? s.words : undefined,
+    active: path === activePath,
+    missing: !inThisTab,
+    onCreate: () => actions.createMissing(path),
+    badges,
+    drag: { group: `scenes:${ch.name}`, name: s.name, names, onDrop: (order) => actions.reorder(ch.name, order) },
+    menu: () => [
+      otherExists
+        ? { label: tab === 'outline' ? 'Open scene' : 'Open plot', onclick: () => { location.hash = bookHref(id, tab === 'outline' ? 'manuscript' : 'outline', otherPath); } }
+        : { label: tab === 'outline' ? 'Create scene file' : 'Create plot file', onclick: () => actions.createMissing(otherPath) },
+      null,
+      { label: 'Rename scene…', onclick: () => actions.renameScene(ch, s) },
+      ...moveItems(names, s.name, (order) => actions.reorder(ch.name, order)),
+      null,
+      { label: 'Delete scene…', danger: true, onclick: () => actions.deleteScene(ch, s) },
+    ],
+  });
 }
 
-function manuscriptTab(tree, id, activePath) {
-  const out = tree.chapters.map((ch) => chapterGroup(ch, ch.scenes.map((s) => item({
-    id,
-    tab: 'manuscript',
-    path: s.manuscriptPath,
-    title: s.title,
-    words: s.inManuscript ? s.words : undefined,
-    active: s.manuscriptPath === activePath,
-    missing: !s.inManuscript,
-    badges: [
-      ...(!s.inOutline && s.inManuscript ? [{ text: 'no plot', hint: 'No matching file in outline/' }] : []),
-      ...(!s.inManuscript ? [{ text: 'no scene file', hint: 'Only the outline file exists' }] : []),
-      ...(s.variants.length ? [{ text: `+${s.variants.length} variant`, hint: s.variants.map((v) => v.name).join(', ') }] : []),
-    ],
-  }))));
+function looseFiles(ctx, files) {
+  if (!files.length) return [];
+  return [
+    h('div', { class: 'group-label' }, 'Not in a chapter'),
+    ...files.map((f) => row({ id: ctx.id, tab: ctx.tab, path: f.path, title: f.title, active: f.path === ctx.activePath })),
+  ];
+}
 
-  if (tree.looseManuscript.length) {
-    out.push(h('div', { class: 'group-label' }, 'Not in a chapter'));
-    out.push(...tree.looseManuscript.map((f) => item({ id, tab: 'manuscript', path: f.path, title: f.title, active: f.path === activePath })));
-  }
-  if (!out.length) out.push(h('div', { class: 'empty', style: 'padding: 12px' }, 'No chapters yet.'));
+function manuscriptTab(ctx) {
+  const { tree, actions } = ctx;
+  const out = [toolbar(addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()))];
+  out.push(...tree.chapters.map((ch) => chapterGroup(ctx, ch, ch.scenes.map((s) => sceneRow(ctx, ch, s)))));
+  out.push(...looseFiles(ctx, tree.looseManuscript));
+  if (!tree.chapters.length) out.push(h('div', { class: 'empty-tree' }, 'No chapters yet. Use “+ Chapter” to start.'));
   return out;
 }
 
-function outlineTab(tree, id, activePath) {
-  const out = tree.chapters.map((ch) => chapterGroup(ch, [
-    item({
+function outlineTab(ctx) {
+  const { tree, actions, id, activePath } = ctx;
+  const out = [toolbar(addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()))];
+  out.push(...tree.chapters.map((ch) => chapterGroup(ctx, ch, [
+    row({
       id,
       tab: 'outline',
       path: ch.summaryPath,
       title: 'Chapter summary',
       active: ch.summaryPath === activePath,
       missing: !ch.hasSummary,
-      badges: ch.hasSummary ? [] : [{ text: 'missing', hint: `${ch.summaryPath} does not exist` }],
+      onCreate: () => actions.createMissing(ch.summaryPath),
     }),
-    ...ch.scenes.map((s) => item({
-      id,
-      tab: 'outline',
-      path: s.outlinePath,
-      title: s.title,
-      active: s.outlinePath === activePath,
-      missing: !s.inOutline,
-      badges: [
-        ...(!s.inOutline ? [{ text: 'no plot file', hint: 'Only the manuscript file exists' }] : []),
-        ...(!s.inManuscript && s.inOutline ? [{ text: 'no scene', hint: 'No matching file in manuscript/' }] : []),
-      ],
-    })),
-  ]));
-
-  if (tree.looseOutline.length) {
-    out.push(h('div', { class: 'group-label' }, 'Not in a chapter'));
-    out.push(...tree.looseOutline.map((f) => item({ id, tab: 'outline', path: f.path, title: f.title, active: f.path === activePath })));
-  }
-  if (!out.length) out.push(h('div', { class: 'empty', style: 'padding: 12px' }, 'No chapters yet.'));
+    ...ch.scenes.map((s) => sceneRow(ctx, ch, s)),
+  ])));
+  out.push(...looseFiles(ctx, tree.looseOutline));
+  if (!tree.chapters.length) out.push(h('div', { class: 'empty-tree' }, 'No chapters yet. Use “+ Chapter” to start.'));
   return out;
 }
 
-function codexGroup(label, entries, id, activePath, { open = true } = {}) {
+// --- codex tab ---------------------------------------------------------------
+
+function codexGroup(ctx, label, entries, { open = true, addKind, editable = true } = {}) {
+  const { id, activePath, actions } = ctx;
   const children = [];
   let folder = '';
   for (const e of entries) {
@@ -90,30 +228,58 @@ function codexGroup(label, entries, id, activePath, { open = true } = {}) {
       folder = e.folder;
       if (folder) children.push(h('div', { class: 'subfolder' }, folder));
     }
-    children.push(item({ id, tab: 'codex', path: e.path, title: e.title, active: e.path === activePath }));
+    children.push(row({
+      id,
+      tab: 'codex',
+      path: e.path,
+      title: e.title,
+      active: e.path === activePath,
+      menu: editable ? () => [
+        { label: 'Rename…', onclick: () => actions.renameCodex(e) },
+        null,
+        { label: 'Delete…', danger: true, onclick: () => actions.deleteCodex(e) },
+      ] : null,
+    }));
   }
-  if (!children.length) children.push(h('div', { class: 'item missing' }, h('span', { class: 'title' }, 'None yet')));
+  if (!children.length) children.push(h('div', { class: 'empty-tree' }, 'None yet.'));
   const hasActive = entries.some((e) => e.path === activePath);
   return h('details', { class: 'group', open: open || hasActive },
-    h('summary', {}, h('span', {}, label), h('span', { class: 'count' }, entries.length)),
+    h('summary', {},
+      h('span', { class: 'chapter-title' }, label),
+      h('span', { class: 'count' }, entries.length),
+      addKind ? addButton('+', `Add ${addKind.label}`, () => actions.addCodex(addKind.kind)) : null),
     children);
 }
 
-function codexTab(tree, id, activePath) {
+function codexTab(ctx) {
+  const { tree, actions } = ctx;
   const { codex } = tree;
   return [
-    codexGroup('Characters', codex.characters, id, activePath),
-    codexGroup('Locations', codex.locations, id, activePath),
-    codexGroup('Notes', codex.notes, id, activePath),
-    codexGroup('Templates', codex.templates, id, activePath, { open: false }),
-    codexGroup('Book files', tree.rootFiles.map((f) => ({ ...f, title: f.name, folder: '' })), id, activePath, { open: false }),
+    toolbar(
+      addButton('+ Character', 'Add a character from the template', () => actions.addCodex('character')),
+      addButton('+ Location', 'Add a location from the template', () => actions.addCodex('location')),
+      addButton('+ Note', 'Add a free-form codex note', () => actions.addCodex('note')),
+    ),
+    codexGroup(ctx, 'Characters', codex.characters, { addKind: { kind: 'character', label: 'a character' } }),
+    codexGroup(ctx, 'Locations', codex.locations, { addKind: { kind: 'location', label: 'a location' } }),
+    codexGroup(ctx, 'Notes', codex.notes, { addKind: { kind: 'note', label: 'a note' } }),
+    codexGroup(ctx, 'Templates', codex.templates, { open: false }),
+    codexGroup(ctx, 'Book files', tree.rootFiles.map((f) => ({ ...f, title: f.name, folder: '' })), { open: false, editable: false }),
   ];
 }
 
 const TABS = { manuscript: manuscriptTab, outline: outlineTab, codex: codexTab };
 
-export function renderTree(container, tree, { id, tab, activePath }) {
-  container.replaceChildren(...TABS[tab](tree, id, activePath));
+export function renderTree(container, tree, { id, tab, activePath, actions }) {
+  // Keep collapsed chapters collapsed across re-renders.
+  const closed = new Set([...container.querySelectorAll('details.chapter:not([open])')].map((d) => d.dataset.chapter));
+  const scroll = container.scrollTop;
+  const ctx = { id, tab, activePath, actions, tree, chapterNames: tree.chapters.map((c) => c.name) };
+  container.replaceChildren(...TABS[tab](ctx));
+  for (const d of container.querySelectorAll('details.chapter')) {
+    if (closed.has(d.dataset.chapter) && !d.querySelector('.item.active')) d.open = false;
+  }
+  container.scrollTop = scroll;
   container.querySelector('.item.active')?.scrollIntoView({ block: 'nearest' });
 }
 

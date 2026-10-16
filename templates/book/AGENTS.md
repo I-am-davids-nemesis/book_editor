@@ -1,0 +1,30 @@
+# AGENTS.md — {{title}}
+
+Guidance for any agent (Claude Code or otherwise) working in this book. The book is edited with a local browser editor, by hand, in Obsidian and by agents, so keep to the layout below; the editor relies on it.
+
+## Layout
+
+```
+manuscript/
+  01-chapter-slug/
+    01-scene-slug.md      # prose only, no front matter
+outline/
+  01-chapter-slug/
+    _chapter.md           # what the chapter must do
+    01-scene-slug.md      # plot notes for the scene of the same name
+codex/
+  characters/             # one file per character
+  locations/              # one file per location
+  _templates/             # templates the editor uses for new entries
+  *.md                    # free-form notes
+compiled/                 # generated; not committed
+```
+
+## Rules
+
+- **Names:** chapters are folders named `NN-slug`, scenes are files named `NN-slug.md`. The number sets the order; slugs are lowercase words joined by hyphens.
+- **Mirror:** every scene in `manuscript/` has a file with the same path in `outline/`, and every chapter has `outline/<chapter>/_chapter.md`. When you add, rename, move or delete one side, do the same to the other.
+- **Reordering:** renumber with `git mv` so history follows the file.
+- **Scene files hold prose only.** Plot, POV and who's present go in the outline file.
+- **Codex before manuscript.** If a draft needs a fact not in the codex, add it to the codex in the same change. Each fact lives in one place; other files link to it.
+- Reserved for later: a middle segment in a scene name (`01-opening.camera.md`) marks a variant draft. Don't use it for anything else.

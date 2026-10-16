@@ -1,6 +1,43 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+// Isolate git from the user's own config and give it an identity.
+Object.assign(process.env, {
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@example.com',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@example.com',
+});
+
+export function gitIn(root, ...args) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+}
+
+// A temp book with `files`, committed to a fresh repo.
+export async function gitBook(files) {
+  const root = await tempDir();
+  await writeFiles(root, files);
+  gitIn(root, 'init', '-q', '-b', 'main');
+  gitIn(root, 'add', '-A');
+  gitIn(root, 'commit', '-q', '-m', 'init');
+  return root;
+}
+
+// Every file under root (not .git), sorted, as book-relative paths.
+export async function listFiles(root, rel = '') {
+  const out = [];
+  for (const e of await fs.readdir(path.join(root, rel), { withFileTypes: true })) {
+    if (e.name === '.git') continue;
+    const child = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...(await listFiles(root, child)));
+    else out.push(child);
+  }
+  return out.sort();
+}
 
 export async function tempDir(prefix = 'book-editor-test-') {
   return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
