@@ -62,10 +62,14 @@ async function buildChapters(root) {
           title: base.title,
           manuscriptPath: `${ch.manuscriptPath}/${base.name}`,
           outlinePath: `${ch.outlinePath}/${base.name}`,
+          // inManuscript: any manuscript file (plain or variant); hasBase: the plain file.
           inManuscript: false,
+          hasBase: false,
           inOutline: false,
           words: 0,
           variants: [],
+          // Words per mode; '' is the plain file, other keys are variant names.
+          wordsByMode: {},
         });
       }
       return scenes.get(parsed.base);
@@ -75,12 +79,16 @@ async function buildChapters(root) {
       const parsed = parseSceneName(e.name);
       if (!parsed) continue;
       const scene = sceneFor(parsed);
+      const filePath = `${ch.manuscriptPath}/${e.name}`;
+      const words = await wordsIn(path.join(root, filePath));
+      scene.inManuscript = true;
       if (parsed.variant) {
-        scene.variants.push({ name: e.name, variant: parsed.variant, path: `${ch.manuscriptPath}/${e.name}` });
+        scene.variants.push({ name: e.name, variant: parsed.variant, path: filePath, words });
       } else {
-        scene.inManuscript = true;
-        scene.words = await wordsIn(path.join(root, scene.manuscriptPath));
+        scene.hasBase = true;
+        scene.words = words;
       }
+      scene.wordsByMode[parsed.variant ?? ''] = words;
     }
     for (const e of olFiles) {
       if (e.name === CHAPTER_SUMMARY) continue;
@@ -90,10 +98,20 @@ async function buildChapters(root) {
     }
 
     ch.scenes = [...scenes.values()].sort(compareOrdered);
+    for (const scene of ch.scenes) scene.variants.sort((a, b) => a.variant.localeCompare(b.variant));
     ch.words = ch.scenes.reduce((n, s) => n + s.words, 0);
+    ch.wordsByMode = sumByMode(ch.scenes);
     chapters.push(ch);
   }
   return chapters.sort(compareOrdered);
+}
+
+function sumByMode(items) {
+  const out = {};
+  for (const item of items) {
+    for (const [mode, n] of Object.entries(item.wordsByMode)) out[mode] = (out[mode] || 0) + n;
+  }
+  return out;
 }
 
 // Loose .md files directly under manuscript/ or outline/ (not in a chapter).
@@ -153,5 +171,10 @@ export async function buildTree(root) {
     codex: await buildCodex(root),
     rootFiles: await buildRootFiles(root),
     words: chapters.reduce((n, c) => n + c.words, 0),
+    wordsByMode: sumByMode(chapters),
+    // Narration modes in use (variant names), and whether any scene has a
+    // plain file. Together they say which modes the editor offers.
+    modes: [...new Set(chapters.flatMap((c) => c.scenes.flatMap((s) => s.variants.map((v) => v.variant))))].sort(),
+    hasBaseScenes: chapters.some((c) => c.scenes.some((s) => s.hasBase)),
   };
 }

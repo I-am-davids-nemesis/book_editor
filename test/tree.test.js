@@ -52,3 +52,23 @@ test('buildTree handles an empty folder', async () => {
   assert.equal(tree.words, 0);
   assert.deepEqual(tree.codex.characters, []);
 });
+
+test('buildTree reports modes and per-mode word counts', async () => {
+  const root = await tempDir();
+  await writeFiles(root, {
+    'manuscript/01-a/01-one.camera.md': 'one two',
+    'manuscript/01-a/01-one.rotating-third.md': 'one two three',
+    'manuscript/01-a/02-two.camera.md': 'four',
+    'outline/01-a/01-one.md': 'plot',
+  });
+  const tree = await buildTree(root);
+  assert.deepEqual(tree.modes, ['camera', 'rotating-third']);
+  assert.equal(tree.hasBaseScenes, false);
+  const [one, two] = tree.chapters[0].scenes;
+  assert.equal(one.inManuscript, true);
+  assert.equal(one.hasBase, false);
+  assert.deepEqual(one.variants.map((v) => [v.variant, v.words]), [['camera', 2], ['rotating-third', 3]]);
+  assert.deepEqual(two.wordsByMode, { camera: 1 });
+  assert.deepEqual(tree.chapters[0].wordsByMode, { camera: 3, 'rotating-third': 3 });
+  assert.deepEqual(tree.wordsByMode, { camera: 3, 'rotating-third': 3 });
+});

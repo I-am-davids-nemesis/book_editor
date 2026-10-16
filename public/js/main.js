@@ -2,7 +2,7 @@ import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
 import { Editor } from './editor.js';
 import { renderLibrary } from './library.js';
-import { renderTree, tabForPath } from './tree.js';
+import { availableModes, findScene, modeLabel, renderTree, sceneFile, sceneFiles, tabForPath } from './tree.js';
 import { bookHref, formatCount, h, parseHash, toast } from './ui.js';
 import { countWords } from './wordcount.js';
 
@@ -28,6 +28,7 @@ class BookView {
 
     this.titleEl = h('span', { class: 'file-title' });
     this.pathEl = h('span', { class: 'file-path' });
+    this.modeSwitchEl = h('span', { class: 'mode-switch', role: 'group', 'aria-label': 'Narration mode', hidden: true });
     this.dirtyEl = h('span', { class: 'dirty-dot', title: 'Unsaved changes', hidden: true });
     this.saveBtn = h('button', { type: 'button', onclick: () => this.save(), disabled: true, title: 'Save (⌘S)' }, 'Save');
     this.bannerEl = h('div', { class: 'banner', hidden: true });
@@ -42,7 +43,7 @@ class BookView {
         this.treeEl,
         this.totalEl),
       h('section', { class: 'editor-area' },
-        h('div', { class: 'editor-head' }, this.dirtyEl, this.titleEl, this.pathEl, this.saveBtn),
+        h('div', { class: 'editor-head' }, this.dirtyEl, this.titleEl, this.modeSwitchEl, this.pathEl, this.saveBtn),
         this.bannerEl,
         this.hostEl,
         this.placeholderEl,
@@ -58,6 +59,50 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
+    this.mode = this.validMode(readStored(`mode:${this.id}`));
+  }
+
+  // --- narration modes -------------------------------------------------------
+
+  validMode(mode) {
+    const modes = availableModes(this.tree);
+    return modes.includes(mode) ? mode : modes[0];
+  }
+
+  setMode(mode, { follow = true } = {}) {
+    this.mode = this.validMode(mode);
+    writeStored(`mode:${this.id}`, this.mode);
+    this.renderTree();
+    // Show the same scene in the new mode, if it exists.
+    const hit = follow && this.file && findScene(this.tree, this.file.path);
+    if (hit && this.file.path.startsWith('manuscript/')) {
+      const target = sceneFile(hit.scene, this.mode);
+      if (target && target !== this.file.path) this.open('manuscript', target);
+    }
+  }
+
+  // Buttons in the editor header to flip the open scene between its modes.
+  renderModeSwitch() {
+    const path = this.file?.path;
+    const hit = path?.startsWith('manuscript/') ? findScene(this.tree, path) : null;
+    const files = hit ? sceneFiles(hit.scene) : [];
+    if (files.length < 2) {
+      this.modeSwitchEl.hidden = true;
+      this.modeSwitchEl.replaceChildren();
+      return;
+    }
+    const modes = [...(hit.scene.hasBase ? [''] : []), ...hit.scene.variants.map((v) => v.variant)];
+    this.modeSwitchEl.replaceChildren(...modes.map((m) => {
+      const target = sceneFile(hit.scene, m);
+      const current = target === path;
+      return h('button', {
+        type: 'button',
+        'aria-pressed': String(current),
+        title: current ? `Showing the ${modeLabel(m)} version` : `Switch to the ${modeLabel(m)} version`,
+        onclick: () => { if (!current) this.setMode(m); },
+      }, modeLabel(m));
+    }));
+    this.modeSwitchEl.hidden = false;
   }
 
   get dirty() {
@@ -81,8 +126,12 @@ class BookView {
   }
 
   renderTree() {
-    renderTree(this.treeEl, this.tree, { id: this.id, tab: this.tab, activePath: this.file?.path, actions: this.actions });
-    this.totalEl.textContent = `${formatCount(this.tree.words)} words in the manuscript`;
+    this.mode = this.validMode(this.mode);
+    renderTree(this.treeEl, this.tree, { id: this.id, tab: this.tab, activePath: this.file?.path, actions: this.actions, mode: this.mode });
+    const words = this.tree.wordsByMode[this.mode] || 0;
+    const which = availableModes(this.tree).length > 1 ? ` (${modeLabel(this.mode)})` : '';
+    this.totalEl.textContent = `${formatCount(words)} words in the manuscript${which}`;
+    this.renderModeSwitch();
   }
 
   async refreshTree() {
@@ -93,6 +142,15 @@ class BookView {
   async openFile(path) {
     const file = await api.readFile(this.id, path);
     this.file = { path: file.path, hash: file.hash };
+    // Opening a scene in some mode makes that the sidebar's mode.
+    const hit = file.path.startsWith('manuscript/') && findScene(this.tree, file.path);
+    if (hit) {
+      const m = hit.scene.variants.find((v) => v.path === file.path)?.variant ?? '';
+      if (m !== this.mode && availableModes(this.tree).includes(m)) {
+        this.mode = m;
+        writeStored(`mode:${this.id}`, m);
+      }
+    }
     this.editor.load(file.content);
     this.hideBanner();
     this.hostEl.hidden = false;
@@ -106,6 +164,7 @@ class BookView {
     const path = this.file?.path ?? '';
     this.titleEl.textContent = path.split('/').pop().replace(/\.md$/i, '');
     this.pathEl.textContent = path;
+    if (this.tree) this.renderModeSwitch();
   }
 
   closeFile() {
@@ -247,8 +306,13 @@ class BookView {
         if (!v) return;
         const res = await this.runOp(() => api.addScene(id, ch.name, v.title, v.position || undefined));
         if (!res) return;
-        const tab = this.tab === 'outline' ? 'outline' : 'manuscript';
-        this.open(tab, `${tab}/${ch.name}/${res.scene}`);
+        if (this.tab === 'outline') {
+          this.open('outline', `outline/${ch.name}/${res.scene}`);
+        } else {
+          const scenes = res.created.filter((p) => p.startsWith('manuscript/'));
+          const inMode = scenes.find((p) => (this.mode ? p.endsWith(`.${this.mode}.md`) : p.endsWith(`/${res.scene}`)));
+          this.open('manuscript', inMode ?? scenes[0]);
+        }
       },
 
       renameChapter: async (ch) => {
@@ -282,6 +346,8 @@ class BookView {
         });
         if (ok) await this.runOp(() => api.deleteScene(id, ch.name, s.name));
       },
+
+      setMode: (mode) => this.setMode(mode),
 
       reorder: (chapter, order) => this.runOp(() => api.reorder(id, chapter || undefined, order)),
 
@@ -339,6 +405,23 @@ class BookView {
   hideBanner() {
     this.bannerEl.hidden = true;
     this.bannerEl.replaceChildren();
+  }
+}
+
+// Per-browser conveniences (like the chosen mode); never required to work.
+function readStored(key) {
+  try {
+    return localStorage.getItem(`book-editor:${key}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    localStorage.setItem(`book-editor:${key}`, value);
+  } catch {
+    // storage blocked; the choice just won't be remembered
   }
 }
 

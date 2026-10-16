@@ -191,3 +191,34 @@ test('structure operations refuse names that are not in the book', async () => {
   await assert.rejects(deleteScene(root, '01-alpha', '../02-beta'), { status: 404 });
   await assert.rejects(renameScene(root, '01-alpha', '_chapter.md', { title: 'x' }), { status: 404 });
 });
+
+test('in a book written in modes, new scenes get one file per mode', async () => {
+  const root = await gitBook({
+    'manuscript/01-a/01-one.camera.md': 'c',
+    'manuscript/01-a/01-one.rotating-third.md': 'r',
+    'outline/01-a/01-one.md': 'p',
+  });
+  const res = await addScene(root, '01-a', { title: 'Two' });
+  assert.deepEqual(res.created, [
+    'manuscript/01-a/02-two.camera.md',
+    'manuscript/01-a/02-two.rotating-third.md',
+    'outline/01-a/02-two.md',
+  ]);
+
+  // Moving a scene moves every mode.
+  await reorderScenes(root, '01-a', { order: ['02-two.md', '01-one.md'] });
+  assert.equal(await read(root, 'manuscript/01-a/02-one.camera.md'), 'c');
+  assert.equal(await read(root, 'manuscript/01-a/02-one.rotating-third.md'), 'r');
+
+  // A missing mode can be created.
+  await fs.rm(path.join(root, 'manuscript/01-a/01-two.camera.md'));
+  await createMissing(root, 'manuscript/01-a/01-two.camera.md');
+  assert.equal(await read(root, 'manuscript/01-a/01-two.camera.md'), '');
+  await assert.rejects(createMissing(root, 'outline/01-a/01-two.camera.md'), { status: 400 });
+});
+
+test('a book with plain scene files keeps adding plain files', async () => {
+  const root = await gitBook({ ...BOOK });
+  const res = await addScene(root, '02-beta', { title: 'New' });
+  assert.deepEqual(res.created, ['manuscript/02-beta/02-new.md', 'outline/02-beta/02-new.md']);
+});

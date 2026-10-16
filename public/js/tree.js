@@ -1,5 +1,45 @@
 import { bookHref, formatCount, h, showMenu } from './ui.js';
 
+// --- narration modes -------------------------------------------------------
+// A scene can exist as a plain file (mode '') and/or as variants
+// (`01-x.camera.md` is mode 'camera'). The sidebar shows one mode at a time.
+
+export function modeLabel(mode) {
+  if (!mode) return 'Main';
+  const words = mode.replace(/[-_]+/g, ' ');
+  return words[0].toUpperCase() + words.slice(1);
+}
+
+// Modes the book offers, in display order.
+export function availableModes(tree) {
+  return [...(tree.hasBaseScenes || !tree.modes.length ? [''] : []), ...tree.modes];
+}
+
+// The scene's manuscript file for a mode, or null if it doesn't exist.
+export function sceneFile(scene, mode) {
+  if (!mode) return scene.hasBase ? scene.manuscriptPath : null;
+  return scene.variants.find((v) => v.variant === mode)?.path ?? null;
+}
+
+// Where the scene's file for a mode would be (for "Create").
+export function expectedSceneFile(scene, mode) {
+  return mode ? scene.manuscriptPath.replace(/\.md$/i, `.${mode}.md`) : scene.manuscriptPath;
+}
+
+export function sceneFiles(scene) {
+  return [...(scene.hasBase ? [scene.manuscriptPath] : []), ...scene.variants.map((v) => v.path)];
+}
+
+// The scene (and chapter) that a manuscript path belongs to, if any.
+export function findScene(tree, path) {
+  for (const ch of tree.chapters) {
+    for (const s of ch.scenes) {
+      if (s.outlinePath === path || sceneFiles(s).includes(path)) return { ch, scene: s };
+    }
+  }
+  return null;
+}
+
 // Renders one sidebar tab from the server's tree. Opening a file is a link
 // (navigation); everything that changes the book goes through `actions`,
 // which main.js supplies:
@@ -116,11 +156,11 @@ function addButton(label, title, onclick) {
 }
 
 function chapterGroup(ctx, ch, children) {
-  const { tab, actions, chapterNames } = ctx;
+  const { tab, actions, chapterNames, mode } = ctx;
   const sceneLabel = tab === 'outline' ? '+ Scene summary' : '+ Scene';
   const summary = h('summary', {},
     h('span', { class: 'chapter-title' }, ch.title),
-    h('span', { class: 'count' }, tab === 'manuscript' ? formatCount(ch.words) : ''),
+    h('span', { class: 'count' }, tab === 'manuscript' ? formatCount(ch.wordsByMode[mode] || 0) : ''),
     addButton(sceneLabel, 'Add a scene to this chapter (creates the scene file and its plot file)', () => actions.addScene(ch)),
     moreButton(`Actions for chapter ${ch.title}`, () => [
       { label: sceneLabel, onclick: () => actions.addScene(ch) },
@@ -141,17 +181,19 @@ function chapterGroup(ctx, ch, children) {
 }
 
 function sceneRow(ctx, ch, s) {
-  const { id, tab, activePath, actions } = ctx;
-  const inThisTab = tab === 'outline' ? s.inOutline : s.inManuscript;
-  const path = tab === 'outline' ? s.outlinePath : s.manuscriptPath;
-  const otherPath = tab === 'outline' ? s.manuscriptPath : s.outlinePath;
+  const { id, tab, activePath, actions, mode } = ctx;
+  const modeFile = sceneFile(s, mode);
+  const scenePath = modeFile ?? expectedSceneFile(s, mode);
+  const inThisTab = tab === 'outline' ? s.inOutline : Boolean(modeFile);
+  const path = tab === 'outline' ? s.outlinePath : scenePath;
+  const otherPath = tab === 'outline' ? (sceneFile(s, mode) ?? sceneFiles(s)[0] ?? scenePath) : s.outlinePath;
   const otherExists = tab === 'outline' ? s.inManuscript : s.inOutline;
   const names = ch.scenes.map((x) => x.name);
 
   const badges = [];
   if (tab === 'manuscript') {
     if (s.inManuscript && !s.inOutline) badges.push({ text: 'no plot', hint: 'No matching file in outline/' });
-    if (s.variants.length) badges.push({ text: `+${s.variants.length} variant`, hint: s.variants.map((v) => v.name).join(', ') });
+    if (!modeFile && s.inManuscript) badges.push({ text: `no ${modeLabel(mode).toLowerCase()}`, hint: `This scene has no ${modeLabel(mode)} version yet` });
   } else if (s.inOutline && !s.inManuscript) {
     badges.push({ text: 'no scene', hint: 'No matching file in manuscript/' });
   }
@@ -161,8 +203,8 @@ function sceneRow(ctx, ch, s) {
     tab,
     path,
     title: s.title,
-    words: tab === 'manuscript' && s.inManuscript ? s.words : undefined,
-    active: path === activePath,
+    words: tab === 'manuscript' && modeFile ? s.wordsByMode[mode] : undefined,
+    active: tab === 'outline' ? path === activePath : sceneFiles(s).includes(activePath) || path === activePath,
     missing: !inThisTab,
     onCreate: () => actions.createMissing(path),
     badges,
@@ -188,9 +230,18 @@ function looseFiles(ctx, files) {
   ];
 }
 
+function modePicker(ctx) {
+  const modes = availableModes(ctx.tree);
+  if (modes.length < 2) return null;
+  return h('label', { class: 'mode-picker', title: 'Which narration mode the sidebar opens and counts' },
+    h('span', {}, 'Mode'),
+    h('select', { onchange: (e) => ctx.actions.setMode(e.target.value) },
+      modes.map((m) => h('option', { value: m, selected: m === ctx.mode || null }, modeLabel(m)))));
+}
+
 function manuscriptTab(ctx) {
   const { tree, actions } = ctx;
-  const out = [toolbar(addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()))];
+  const out = [toolbar(addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()), modePicker(ctx))];
   out.push(...tree.chapters.map((ch) => chapterGroup(ctx, ch, ch.scenes.map((s) => sceneRow(ctx, ch, s)))));
   out.push(...looseFiles(ctx, tree.looseManuscript));
   if (!tree.chapters.length) out.push(h('div', { class: 'empty-tree' }, 'No chapters yet. Use “+ Chapter” to start.'));
@@ -270,11 +321,11 @@ function codexTab(ctx) {
 
 const TABS = { manuscript: manuscriptTab, outline: outlineTab, codex: codexTab };
 
-export function renderTree(container, tree, { id, tab, activePath, actions }) {
+export function renderTree(container, tree, { id, tab, activePath, actions, mode = '' }) {
   // Keep collapsed chapters collapsed across re-renders.
   const closed = new Set([...container.querySelectorAll('details.chapter:not([open])')].map((d) => d.dataset.chapter));
   const scroll = container.scrollTop;
-  const ctx = { id, tab, activePath, actions, tree, chapterNames: tree.chapters.map((c) => c.name) };
+  const ctx = { id, tab, activePath, actions, mode, tree, chapterNames: tree.chapters.map((c) => c.name) };
   container.replaceChildren(...TABS[tab](ctx));
   for (const d of container.querySelectorAll('details.chapter')) {
     if (closed.has(d.dataset.chapter) && !d.querySelector('.item.active')) d.open = false;

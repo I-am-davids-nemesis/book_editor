@@ -192,21 +192,31 @@ function pickOrder(all, order) {
 
 // --- scenes ---------------------------------------------------------------
 
+// The manuscript files a new scene gets: one per narration mode when every
+// existing scene is written in modes (variants only), else one plain file.
+function newSceneFiles(tree, name) {
+  if (tree.modes.length && !tree.hasBaseScenes) {
+    const stem = name.replace(/\.md$/i, '');
+    return tree.modes.map((mode) => `${stem}.${mode}.md`);
+  }
+  return [name];
+}
+
 export async function addScene(root, chapter, { title, position } = {}) {
   const slug = requireSlug(title);
-  const { ch } = await findChapter(root, chapter);
+  const { tree, ch } = await findChapter(root, chapter);
   const entries = insertAt(ordered(ch.scenes), position, { isNew: true, slug });
   const moves = await applyMoves(root, await renumber(root, entries, 'scene', ch.name));
 
   const i = entries.findIndex((e) => e.isNew);
   const name = numberedScene(i + 1, prefixWidth(entries.length), { slug });
-  const scenePath = `manuscript/${ch.name}/${name}`;
+  const scenePaths = newSceneFiles(tree, name).map((f) => `manuscript/${ch.name}/${f}`);
   const plotPath = `outline/${ch.name}/${name}`;
   await fs.mkdir(path.join(root, 'manuscript', ch.name), { recursive: true });
   await fs.mkdir(path.join(root, 'outline', ch.name), { recursive: true });
-  await fs.writeFile(path.join(root, scenePath), '');
+  for (const p of scenePaths) await fs.writeFile(path.join(root, p), '');
   await fs.writeFile(path.join(root, plotPath), await renderTemplate(root, 'scene-outline', { scene: titleize(slug), name: titleize(slug), chapter: ch.title }));
-  return { scene: name, moves, created: [scenePath, plotPath], deleted: [] };
+  return { scene: name, moves, created: [...scenePaths, plotPath], deleted: [] };
 }
 
 export async function renameScene(root, chapter, scene, { title } = {}) {
@@ -239,7 +249,8 @@ export async function reorderScenes(root, chapter, { order } = {}) {
 // --- mirror repair ----------------------------------------------------------
 
 // Creates the missing half of a chapter or scene: a chapter summary, a plot
-// file, or an empty scene file. Only those three shapes are accepted.
+// file, or an empty scene file (plain or one mode's variant). Only those
+// shapes are accepted.
 export async function createMissing(root, rel) {
   const parts = typeof rel === 'string' ? rel.split('/') : [];
   if (parts.length !== 3 || !TREES.includes(parts[0]) || !parts[2].toLowerCase().endsWith('.md')) {
@@ -253,7 +264,9 @@ export async function createMissing(root, rel) {
   if (tree === 'outline' && file === CHAPTER_SUMMARY) {
     content = await renderTemplate(root, 'chapter-outline', { chapter: ch.title, name: ch.title });
   } else {
-    const s = findScene(ch, file);
+    const parsed = parseSceneName(file);
+    if (!parsed || (parsed.variant && tree === 'outline')) throw badRequest('Plot files have no variants');
+    const s = findScene(ch, parsed.base);
     content = tree === 'outline'
       ? await renderTemplate(root, 'scene-outline', { scene: s.title, name: s.title, chapter: ch.title })
       : '';
