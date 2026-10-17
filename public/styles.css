@@ -347,6 +347,7 @@ a.row-main { cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 .statusbar .spacer { flex: 1; }
+.statusbar .commit-state.error { color: var(--danger); }
 
 .toast {
   position: fixed;

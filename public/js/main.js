@@ -11,6 +11,13 @@ const crumb = document.getElementById('crumb');
 
 const TAB_LABELS = { manuscript: 'Manuscript', outline: 'Outline', codex: 'Codex' };
 
+// Edits are written to disk after a short pause in typing, and at least this
+// often while typing continues. Commits happen on the server: when you switch
+// files, and 30 minutes after the first uncommitted change at the latest.
+const AUTOSAVE_IDLE_MS = 1000;
+const AUTOSAVE_MAX_WAIT_MS = 5000;
+const AUTOSAVE_RETRY_MS = 10000;
+
 // The book screen is built once per book and updated as the route changes.
 class BookView {
   constructor(id) {
@@ -20,6 +27,10 @@ class BookView {
     this.tab = 'manuscript';
     this.file = null; // { path, hash }
     this.saving = null;
+    this.conflicted = false; // a save hit a conflict; autosave waits for the banner
+    this.autosaveTimer = null;
+    this.firstUnsavedAt = 0;
+    this.saveFailed = false; // retry slowly, and toast once, while saves fail
 
     this.tabButtons = Object.entries(TAB_LABELS).map(([tab, label]) =>
       h('button', { type: 'button', role: 'tab', 'data-tab': tab, onclick: () => this.showTab(tab) }, label));
@@ -30,12 +41,13 @@ class BookView {
     this.pathEl = h('span', { class: 'file-path' });
     this.modeSwitchEl = h('span', { class: 'mode-switch', role: 'group', 'aria-label': 'Narration mode', hidden: true });
     this.dirtyEl = h('span', { class: 'dirty-dot', title: 'Unsaved changes', hidden: true });
-    this.saveBtn = h('button', { type: 'button', onclick: () => this.save(), disabled: true, title: 'Save (⌘S)' }, 'Save');
+    this.saveBtn = h('button', { type: 'button', onclick: () => this.save(), disabled: true, title: 'Save now (⌘S). Edits also save by themselves after a second.' }, 'Save');
     this.bannerEl = h('div', { class: 'banner', hidden: true });
     this.hostEl = h('div', { class: 'editor-host', hidden: true });
     this.placeholderEl = h('div', { class: 'placeholder' }, 'Choose a scene, plot file or codex entry on the left.');
     this.wordsEl = h('span');
     this.stateEl = h('span');
+    this.commitEl = h('span', { class: 'commit-state' });
 
     this.el = h('div', { class: 'book' },
       h('aside', { class: 'sidebar' },
@@ -47,10 +59,10 @@ class BookView {
         this.bannerEl,
         this.hostEl,
         this.placeholderEl,
-        h('div', { class: 'statusbar' }, this.wordsEl, h('span', { class: 'spacer' }), this.stateEl)));
+        h('div', { class: 'statusbar' }, this.wordsEl, h('span', { class: 'spacer' }), this.commitEl, this.stateEl)));
 
     this.editor = new Editor(this.hostEl, {
-      onChange: () => this.updateStatus(),
+      onChange: () => { this.updateStatus(); this.scheduleAutosave(); },
       onSave: () => this.save(),
     });
   }
@@ -111,9 +123,11 @@ class BookView {
 
   async route({ tab, path }) {
     const nextTab = tab && TAB_LABELS[tab] ? tab : (path ? tabForPath(path) : this.tab);
-    if (path !== (this.file?.path ?? null)) {
+    const previous = this.file?.path ?? null;
+    if (path !== previous) {
       if (path) await this.openFile(path);
       else this.closeFile();
+      if (previous) this.checkpoint(`switched away from ${previous}`);
     }
     this.showTab(nextTab, { updateHash: false });
   }
@@ -151,6 +165,8 @@ class BookView {
         writeStored(`mode:${this.id}`, m);
       }
     }
+    clearTimeout(this.autosaveTimer);
+    this.firstUnsavedAt = 0;
     this.editor.load(file.content);
     this.hideBanner();
     this.hostEl.hidden = false;
@@ -168,6 +184,7 @@ class BookView {
   }
 
   closeFile() {
+    clearTimeout(this.autosaveTimer);
     this.file = null;
     this.editor.load('');
     this.hideBanner();
@@ -190,13 +207,69 @@ class BookView {
     this.countTimer = setTimeout(() => {
       this.wordsEl.textContent = `${formatCount(countWords(this.editor.content))} words`;
     }, 150);
-    this.stateEl.textContent = this.saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved';
+    this.stateEl.textContent = this.saving ? 'Saving…'
+      : !dirty ? 'Saved'
+      : this.conflicted ? 'Not saved: changed on disk'
+      : this.saveFailed ? 'Not saved: retrying'
+      : 'Unsaved changes';
+  }
+
+  // --- saving and committing -------------------------------------------------
+
+  scheduleAutosave() {
+    clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = null;
+    if (!this.dirty || this.conflicted) {
+      this.firstUnsavedAt = 0;
+      return;
+    }
+    const now = Date.now();
+    this.firstUnsavedAt ||= now;
+    const delay = this.saveFailed
+      ? AUTOSAVE_RETRY_MS
+      : Math.max(0, Math.min(AUTOSAVE_IDLE_MS, this.firstUnsavedAt + AUTOSAVE_MAX_WAIT_MS - now));
+    this.autosaveTimer = setTimeout(() => {
+      this.autosaveTimer = null;
+      this.save();
+    }, delay);
+  }
+
+  // Asks the server to commit everything that changed in the book. Never
+  // blocks editing; a failure shows once in the status bar.
+  async checkpoint(reason) {
+    try {
+      const res = await api.checkpoint(this.id, reason);
+      if (res.committed) {
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        this.commitEl.textContent = `Committed ${res.commit} at ${time}`;
+        this.commitEl.title = res.files.join('\n');
+        this.commitEl.classList.remove('error');
+      }
+    } catch (err) {
+      this.commitEl.textContent = 'Auto-commit failed';
+      this.commitEl.title = err.message;
+      this.commitEl.classList.add('error');
+    }
   }
 
   // Resolves true when the file is saved (or there was nothing to save).
+  // Last-chance write when the page goes away; the server's timer (or its
+  // shutdown) commits it later.
+  saveOnExit() {
+    if (!this.dirty) return;
+    api.writeFile(this.id, this.file.path, this.editor.content, this.file.hash, false, { keepalive: true }).catch(() => {});
+  }
+
   async save({ force = false } = {}) {
     if (!this.file || (!this.dirty && !force)) return true;
-    if (this.saving) return this.saving;
+    if (this.saving) {
+      // Typing may have continued while that save was in flight.
+      if (!(await this.saving)) return false;
+      return this.save({ force });
+    }
+    clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = null;
+    this.firstUnsavedAt = 0;
     const { path, hash } = this.file;
     const content = this.editor.content;
     this.saving = (async () => {
@@ -208,15 +281,22 @@ class BookView {
           this.editor.markSaved(content);
           this.hideBanner();
         }
+        this.saveFailed = false;
         this.refreshTree().catch(() => {});
         return true;
       } catch (err) {
-        if (err.status === 409) this.showConflict(err.data);
-        else toast(`Could not save: ${err.message}`, { error: true });
+        if (err.status === 409) {
+          this.conflicted = true;
+          this.showConflict(err.data);
+        } else {
+          if (!this.saveFailed) toast(`Could not save: ${err.message}`, { error: true });
+          this.saveFailed = true;
+        }
         return false;
       } finally {
         this.saving = null;
         this.updateStatus();
+        this.scheduleAutosave();
       }
     })();
     return this.saving;
@@ -403,6 +483,7 @@ class BookView {
   }
 
   hideBanner() {
+    this.conflicted = false;
     this.bannerEl.hidden = true;
     this.bannerEl.replaceChildren();
   }
@@ -433,6 +514,7 @@ async function handleRoute() {
   try {
     if (route.view === 'library') {
       if (bookView?.dirty && !(await bookView.save())) return revert();
+      bookView?.checkpoint('left the book');
       bookView = null;
       crumb.textContent = '';
       document.title = 'Book Editor';
@@ -440,6 +522,7 @@ async function handleRoute() {
     } else {
       if (bookView?.id !== route.id) {
         if (bookView?.dirty && !(await bookView.save())) return revert();
+        bookView?.checkpoint('left the book');
         bookView = new BookView(route.id);
         await bookView.init();
         view.replaceChildren(bookView.el);
@@ -472,5 +555,6 @@ window.addEventListener('hashchange', handleRoute);
 window.addEventListener('beforeunload', (e) => {
   if (bookView?.dirty) e.preventDefault();
 });
+window.addEventListener('pagehide', () => bookView?.saveOnExit());
 
 handleRoute();

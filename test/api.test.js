@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { createApp } from '../server/app.js';
 import { saveConfig } from '../server/config.js';
-import { SAMPLE_BOOK, tempDir, writeFiles } from './helpers.js';
+import { gitIn, SAMPLE_BOOK, tempDir, writeFiles } from './helpers.js';
 
 let server;
 let base;
@@ -136,6 +136,19 @@ test('create a book and change its structure over HTTP', async () => {
   assert.equal((await call('DELETE', `/api/books/${id}/codex?path=${encodeURIComponent('codex/characters/tor.md')}`)).status, 200);
 
   assert.equal((await call('DELETE', `/api/books/${id}/chapters/${encodeURIComponent('../01-first')}`)).status, 404);
+});
+
+test('checkpoint commits the book over HTTP', async () => {
+  const created = await call('POST', '/api/books', { title: 'Checkpointed' });
+  const id = created.data.id;
+  const root = path.join(library, id);
+  await call('POST', `/api/books/${id}/chapters`, { title: 'First' });
+  const res = await call('POST', `/api/books/${id}/checkpoint`, { reason: 'switched files' });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.committed, true);
+  assert.ok(res.data.files.includes('outline/01-first/_chapter.md'));
+  assert.equal(gitIn(root, 'status', '--porcelain'), '');
+  assert.deepEqual((await call('POST', `/api/books/${id}/checkpoint`, {})).data, { committed: false });
 });
 
 test('concurrent structure changes are applied one at a time', async () => {

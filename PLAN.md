@@ -13,7 +13,7 @@ A local, browser-based editor for novels stored as plain Markdown in git. A smal
 | Variants | Not in v1; filenames reserve room (`01-opening.camera.md`) |
 | Ordering | Number prefixes in file and folder names; reorder renumbers with `git mv` |
 | Codex | Fixed `characters/` and `locations/` folders (from templates), plus free-form notes |
-| Git | Save writes to disk only; manual Commit panel, optional Push; history, diff and restore per file |
+| Git | Autosave to disk ~1 s after typing stops (at least every 5 s while typing). Auto-commit of all changes in the book when you switch files or leave the book, 30 min after the first uncommitted change, and when the server stops. Manual Commit panel (named milestones), optional Push; history, diff and restore per file |
 | Editor | CodeMirror 6 markdown, with a toggleable rendered preview |
 | Library | Default root `~/workspace/books/`, plus books registered from any path |
 | v1 extras | Scene and plot side by side; word counts; compile; live reload on external edits; git history and diff |
@@ -145,7 +145,7 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
   - *Manuscript:* chapters, with their scenes, are collapsible. **+ Chapter**, plus **+ Scene** on each chapter. Drag to reorder scenes within a chapter and chapters within the book (moving scenes between chapters is v1.1). A context menu offers Rename, Delete, Open plot and History.
   - *Outline:* the same tree, opening plot files and `_chapter.md`. **+ Scene summary** and **+ Chapter summary** create the matching manuscript entries too, so the mirror stays intact.
   - *Codex:* groups for Characters, Locations and Notes, with **+ Character**, **+ Location** and **+ Note**.
-- **Editor area:** opening a scene shows it with its plot file in a split pane (toggleable). Each pane has an Edit / Preview / Split toggle. Saving is Cmd+S, plus autosave after 2 s idle (it only writes to disk, since commits are manual). Dirty state shows in the tab and the tree, and there's a `beforeunload` guard.
+- **Editor area:** opening a scene shows it with its plot file in a split pane (toggleable). Each pane has an Edit / Preview / Split toggle. Saving is Cmd+S, plus autosave after 1 s idle (done early, see Git above). Dirty state shows in the tab and the tree, and there's a `beforeunload` guard.
 - **Git panel (drawer):** changed files with status letters (click one to see its diff), a message box, **Commit**, and **Push** if a remote exists.
 - **History view:** the commit list for a file, a diff of the selected commit, and **Restore this version**.
 

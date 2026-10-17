@@ -6,8 +6,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, url, body) {
-  const opts = { method, headers: {} };
+async function request(method, url, body, { keepalive = false } = {}) {
+  const opts = { method, headers: {}, keepalive };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -27,8 +27,9 @@ export const api = {
   getBook: (id) => request('GET', book(id)),
   getTree: (id) => request('GET', `${book(id)}/tree`),
   readFile: (id, path) => request('GET', `${book(id)}/file?path=${encodeURIComponent(path)}`),
-  writeFile: (id, path, content, baseHash, force = false) =>
-    request('PUT', `${book(id)}/file`, { path, content, baseHash, force }),
+  writeFile: (id, path, content, baseHash, force = false, opts) =>
+    request('PUT', `${book(id)}/file`, { path, content, baseHash, force }, opts),
+  checkpoint: (id, reason) => request('POST', `${book(id)}/checkpoint`, { reason }),
 
   createBook: (title, remote) => request('POST', '/api/books', { title, remote }),
 

@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { AutoCommitter } from './autocommit.js';
 import { createBook, forgetBook, getBook, getBookRoot, listBooks, registerBook } from './books.js';
 import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
 import { buildImportMap } from './importmap.js';
+import { serialized } from './queue.js';
 import {
   addChapter, addScene, createMissing, deleteChapter, deleteScene,
   renameChapter, renameScene, reorderChapters, reorderScenes,
@@ -16,16 +18,6 @@ import { buildTree } from './tree.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
-
-// Structure changes rename many files; run them one at a time per book.
-const queues = new Map();
-function serialized(key, fn) {
-  const run = (queues.get(key) || Promise.resolve()).then(fn, fn);
-  const tail = run.catch(() => {});
-  queues.set(key, tail);
-  tail.then(() => { if (queues.get(key) === tail) queues.delete(key); });
-  return run;
-}
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
@@ -60,8 +52,9 @@ function requireJson(req, res, next) {
   next();
 }
 
-export function createApp() {
+export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
   const app = express();
+  app.locals.autoCommitter = autoCommitter;
   app.disable('x-powered-by');
   app.use(localOnly);
   app.use(requireJson);
@@ -127,14 +120,26 @@ export function createApp() {
 
   api.put('/books/:id/file', async (req, res) => {
     const { path: rel, content, baseHash, force } = req.body || {};
-    res.json(await writeBookFile(await bookRoot(req), rel, content, { baseHash, force: force === true }));
+    const root = await bookRoot(req);
+    const result = await writeBookFile(root, rel, content, { baseHash, force: force === true });
+    autoCommitter.changed(root);
+    res.json(result);
+  });
+
+  // Commits all changes in the book now, if there are any (the editor calls
+  // this when you switch files or leave the book).
+  api.post('/books/:id/checkpoint', async (req, res) => {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : '';
+    res.json(await autoCommitter.commit(await bookRoot(req), reason));
   });
 
   // Runs a structure operation for the book in the route, one at a time.
   function structureRoute(op) {
     return async (req, res) => {
       const root = await bookRoot(req);
-      res.json(await serialized(root, () => op(root, req)));
+      const result = await serialized(root, () => op(root, req));
+      autoCommitter.changed(root);
+      res.json(result);
     };
   }
 
