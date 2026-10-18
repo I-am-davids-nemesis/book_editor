@@ -1,6 +1,7 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
 import { openRevisionPanel } from './gitpanel.js';
+import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
 import { Pane } from './pane.js';
 import {
@@ -10,6 +11,7 @@ import { bookHref, formatCount, h, parseHash, toast } from './ui.js';
 
 const view = document.getElementById('view');
 const crumb = document.getElementById('crumb');
+const topbarActions = document.getElementById('topbar-actions');
 
 const TAB_LABELS = { manuscript: 'Manuscript', outline: 'Outline', codex: 'Codex' };
 const NOTHING_OPEN = 'Choose a scene, plot file or codex entry on the left.';
@@ -65,6 +67,21 @@ class BookView {
         h('div', { class: 'statusbar' },
           this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.commitEl, this.gitBtn)));
 
+    this.history = new HistoryView({
+      bookId: id,
+      onBack: () => this.open(this.tab, this.file?.path),
+      onSelect: (hash) => history.replaceState(null, '', bookHref(this.id, 'history', hash)),
+      onRestored: () => this.reloadFromDisk(),
+      onViewVersion: (v) => this.viewVersion(v),
+      onSaveRevision: async () => {
+        await this.openRevisions();
+        await this.history.show();
+      },
+    });
+    this.el.append(this.history.el);
+    this.historyBtn = h('button', { type: 'button', class: 'history-btn', onclick: () => this.openHistory() }, 'History');
+    this.revisionView = null; // { path, rev, content, label }: an old version shown beside the file
+
     this.setSideVisible(false);
     this.setSplit(Number(readStored('split')) || 0.5);
     this.initResize();
@@ -74,6 +91,7 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
+    topbarActions.replaceChildren(this.historyBtn);
     this.mode = this.validMode(readStored(`mode:${this.id}`));
     this.refreshGit({ now: true });
   }
@@ -158,9 +176,24 @@ class BookView {
   // --- routing ---------------------------------------------------------------
 
   async route({ tab, path }) {
+    if (tab === 'history') {
+      // `path` here is a commit hash, if any.
+      this.el.classList.add('show-history');
+      this.historyBtn.setAttribute('aria-pressed', 'true');
+      const filter = this.historyFilter;
+      this.historyFilter = undefined;
+      await this.history.show({ hash: path, path: filter });
+      return;
+    }
+    if (this.el.classList.contains('show-history')) {
+      this.el.classList.remove('show-history');
+      this.history.hide();
+      this.historyBtn.setAttribute('aria-pressed', 'false');
+    }
     const nextTab = tab && TAB_LABELS[tab] ? tab : (path ? tabForPath(path) : this.tab);
     const previous = this.file?.path ?? null;
     const changed = path !== previous;
+    if (changed && this.revisionView?.path !== path) this.revisionView = null;
     if (changed) {
       if (path) {
         await this.main.open(path);
@@ -209,6 +242,84 @@ class BookView {
     location.hash = bookHref(this.id, tab, path);
   }
 
+  // --- history -------------------------------------------------------------------
+
+  // Opens History, optionally showing only one file's commits.
+  openHistory(path = null) {
+    this.historyFilter = path;
+    const target = bookHref(this.id, 'history');
+    if (location.hash === target) this.route({ tab: 'history' });
+    else location.hash = target;
+  }
+
+  // Files changed on disk underneath the editor (a restore): reread the open
+  // files, which are saved by now, and the tree.
+  async reloadFromDisk() {
+    this.revisionView = null;
+    await this.refreshTree();
+    const path = this.main.file?.path;
+    if (path) {
+      try {
+        await this.main.open(path);
+      } catch {
+        this.main.close(`${path} no longer exists.`);
+      }
+    }
+    this.side.close();
+    await this.syncSide();
+    this.updateStatus();
+    this.refreshGit({ now: true });
+  }
+
+  // Shows an earlier version of a file, read-only, beside the current one.
+  async viewVersion({ path, rev, content, label }) {
+    try {
+      await api.readFile(this.id, path);
+    } catch (err) {
+      if (err.status !== 404) throw err;
+      toast(`${path} doesn't exist any more. Use “Restore this version” to bring it back.`, { error: true });
+      return;
+    }
+    this.revisionView = { path, rev, content, label };
+    if (this.file?.path === path && !this.el.classList.contains('show-history')) await this.syncSide();
+    else this.open(tabForPath(path), path);
+  }
+
+  async showRevisionSide() {
+    const v = this.revisionView;
+    this.setSideVisible(true);
+    this.sideModeEl.hidden = true;
+    this.side.showReadOnly({
+      path: v.path,
+      content: v.content,
+      label: 'Earlier version',
+      note: `${v.label} (read-only)`,
+      actions: [
+        h('button', { type: 'button', onclick: () => this.restoreShownVersion() }, 'Restore this version'),
+        h('button', { type: 'button', onclick: () => { this.revisionView = null; this.side.close(); this.syncSide(); } }, 'Close'),
+      ],
+    });
+  }
+
+  async restoreShownVersion() {
+    const v = this.revisionView;
+    if (!v) return;
+    const ok = await confirmDialog({
+      title: 'Restore this version?',
+      message: `This replaces the current text of ${v.path} with the earlier version. The current text is committed first, so it stays in history.`,
+      okLabel: 'Restore',
+    });
+    if (!ok || !(await this.save())) return;
+    try {
+      await api.checkpoint(this.id, `before restoring ${v.path}`);
+      await api.gitRestoreFile(this.id, v.rev, v.path);
+      toast(`Restored ${v.path}`);
+      await this.reloadFromDisk();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  }
+
   // --- the side pane -----------------------------------------------------------
 
   toggleCompanion() {
@@ -226,6 +337,12 @@ class BookView {
   // Puts the open file's companion in the side pane (or hides it).
   async syncSide() {
     const path = this.file?.path;
+    if (this.revisionView && this.revisionView.path === path) {
+      this.companionBtn.hidden = true;
+      if (!(await this.side.save())) return;
+      await this.showRevisionSide();
+      return;
+    }
     const c = path && this.tree ? companionOf(this.tree, path, this.mode) : null;
     this.companion = c;
     const what = c?.kind === 'plot' ? 'plot' : 'scene';
@@ -524,6 +641,8 @@ class BookView {
 
       setMode: (mode) => this.setMode(mode),
 
+      history: (path) => this.openHistory(path),
+
       reorder: (chapter, order) => this.runOp(() => api.reorder(id, chapter || undefined, order)),
 
       createMissing: async (path) => {
@@ -580,6 +699,7 @@ async function handleRoute() {
       bookView?.checkpoint('left the book');
       bookView = null;
       crumb.textContent = '';
+      topbarActions.replaceChildren();
       document.title = 'Book Editor';
       await renderLibrary(view);
     } else {

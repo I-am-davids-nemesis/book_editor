@@ -15,7 +15,7 @@ export function groupFiles(files) {
   return [...groups].filter(([, list]) => list.length);
 }
 
-export function fileRow(f, { onOpen } = {}) {
+export function fileRow(f, { onOpen, allowDeleted = false, openTitle } = {}) {
   const words = [
     f.added ? h('span', { class: 'words-added', title: 'Words added' }, `+${formatCount(f.added)}`) : null,
     f.removed ? h('span', { class: 'words-removed', title: 'Words removed' }, `−${formatCount(f.removed)}`) : null,
@@ -23,8 +23,8 @@ export function fileRow(f, { onOpen } = {}) {
   const name = f.from ? `${f.from} → ${f.path}` : f.path;
   return h('li', { class: 'change' },
     h('span', { class: `status-letter s-${f.status}`, title: STATUS_LABELS[f.status] || f.status }, f.status),
-    onOpen && f.status !== 'D'
-      ? h('a', { href: '#', class: 'change-path', title: `Open ${f.path}`, onclick: (e) => { e.preventDefault(); onOpen(f.path); } }, name)
+    onOpen && (allowDeleted || f.status !== 'D')
+      ? h('a', { href: '#', class: 'change-path', title: openTitle ?? `Open ${f.path}`, onclick: (e) => { e.preventDefault(); onOpen(f.path); } }, name)
       : h('span', { class: 'change-path' }, name),
     h('span', { class: 'change-words' }, words));
 }

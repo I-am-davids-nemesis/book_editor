@@ -96,7 +96,8 @@ local_editor/
       editor.js           # CodeMirror 6 setup (markdown, line wrap, Cmd+S)
       pane.js             # one open file: editor, Edit/Split/Preview, autosave, conflict banner
       gitpanel.js         # Save revision panel: changed files, message, Push
-      history.js          # per-file log, diff view, restore
+      history.js          # History view: commit graph, details, word diffs, compare, restore
+      graph.js            # autosave folding and lane layout for the graph (pure, tested)
       dialogs.js          # prompt/confirm modals
       wordcount.js        # shared with the server, so both count the same way
       ui.js               # DOM helper, toast, hash routes
@@ -164,7 +165,7 @@ Each milestone ends with something usable, and gets tests before moving on.
 3. ✅ **Writing experience.** Add the scene + plot split pane, preview toggle, autosave, dirty-state handling, and word counts (server and live).
 4. **Git**, in three parts, each checked before the next:
    - ✅ **4a. Status, Save revision, Push.** Status bar shows the draft (branch) and the number of uncommitted files; clicking it opens the Save revision panel (changed files, a message, **Save revision**, **Push** when there's a remote). *Tests:* status parsing, named commit, nothing-to-commit and no-identity errors, push to a local bare remote.
-   - **4b. History view** (§10): the commit graph with autosave runs folded, commit and two-point compare with word-level diffs, restore a file or the whole book, view an old version beside the current one. *Tests:* graph lane layout for merges and several branches; grouping of autosave runs; compare and word counts; restore.
+   - ✅ **4b. History view** (§10): the commit graph with autosave runs folded, commit and two-point compare with word-level diffs, restore a file or the whole book, view an old version beside the current one. *Tests:* graph lane layout for merges and several branches; grouping of autosave runs; compare and word counts; restore.
    - **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the sidebar and graph. *Tests:* create/switch with checkpoint commits; invalid names.
 5. **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. **Compile.** Compile a chapter or the whole book, then download.

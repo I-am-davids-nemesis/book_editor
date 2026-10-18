@@ -59,10 +59,13 @@ export class Editor {
     this.view = new EditorView({ parent: host, state: EditorState.create({ doc: '', extensions: this.extensions }) });
   }
 
-  load(content, { keepSelection = false } = {}) {
+  load(content, { keepSelection = false, readOnly = false } = {}) {
     const selection = keepSelection ? this.view.state.selection : undefined;
     const scrollTop = this.view.scrollDOM.scrollTop;
-    const state = EditorState.create({ doc: content, extensions: this.extensions });
+    const extensions = readOnly
+      ? [...this.extensions, EditorState.readOnly.of(true), EditorView.editable.of(false)]
+      : this.extensions;
+    const state = EditorState.create({ doc: content, extensions });
     this.view.setState(state);
     if (selection) {
       const max = state.doc.length;

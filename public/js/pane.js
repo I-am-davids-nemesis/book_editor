@@ -73,7 +73,7 @@ export class Pane {
   }
 
   get words() {
-    return this.file ? countWords(this.editor.content) : 0;
+    return this.file || this.readOnly ? countWords(this.editor.content) : 0;
   }
 
   // --- opening and closing ---------------------------------------------------
@@ -85,6 +85,8 @@ export class Pane {
 
   load(file) {
     this.cancelAutosave();
+    this.readOnly = null;
+    this.el.classList.remove('read-only');
     this.file = { path: file.path, hash: file.hash };
     this.editor.load(file.content);
     this.hideBanner();
@@ -96,9 +98,29 @@ export class Pane {
     this.updateStatus();
   }
 
+  // Shows text that can't be edited, such as a file as it was in an earlier
+  // commit. `actions` are buttons for the banner above it.
+  showReadOnly({ path, content, label, note, actions = [] }) {
+    this.cancelAutosave();
+    this.file = null;
+    this.readOnly = { path };
+    this.editor.load(content, { readOnly: true });
+    this.showBanner(note, actions);
+    this.bannerEl.classList.add('info');
+    this.bodyEl.hidden = false;
+    this.emptyEl.hidden = true;
+    this.setLabel(label);
+    this.showHeader();
+    this.el.classList.add('read-only');
+    this.renderPreview();
+    this.updateStatus();
+  }
+
   // Shows a message (and optional buttons) instead of a file.
   close(message = '', buttons = []) {
     this.cancelAutosave();
+    this.readOnly = null;
+    this.el.classList.remove('read-only');
     this.file = null;
     this.editor.load('');
     this.hideBanner();
@@ -115,11 +137,11 @@ export class Pane {
   }
 
   showHeader() {
-    const path = this.file?.path ?? '';
+    const path = this.file?.path ?? this.readOnly?.path ?? '';
     this.titleEl.textContent = path.split('/').pop().replace(/\.md$/i, '');
     this.pathEl.textContent = path;
     this.pathEl.title = path;
-    this.el.classList.toggle('no-file', !this.file);
+    this.el.classList.toggle('no-file', !this.file && !this.readOnly);
   }
 
   focus() {
@@ -161,7 +183,7 @@ export class Pane {
 
   renderPreview() {
     clearTimeout(this.previewTimer);
-    if (this.view === 'edit' || !this.file) {
+    if (this.view === 'edit' || (!this.file && !this.readOnly)) {
       this.previewEl.replaceChildren();
       return;
     }
@@ -287,6 +309,7 @@ export class Pane {
 
   hideBanner() {
     this.conflicted = false;
+    this.bannerEl.classList.remove('info');
     this.bannerEl.hidden = true;
     this.bannerEl.replaceChildren();
   }

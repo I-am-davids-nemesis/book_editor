@@ -82,7 +82,8 @@ export function setFileWords(tree, path, words) {
 // which main.js supplies:
 //   addChapter(), addScene(ch), renameChapter(ch), deleteChapter(ch),
 //   renameScene(ch, scene), deleteScene(ch, scene), reorder(chapterName|null, names),
-//   createMissing(path), addCodex(kind), renameCodex(entry), deleteCodex(entry)
+//   createMissing(path), addCodex(kind), renameCodex(entry), deleteCodex(entry),
+//   history(path)
 
 function moreButton(label, items) {
   return h('button', {
@@ -250,6 +251,7 @@ function sceneRow(ctx, ch, s) {
       otherExists
         ? { label: tab === 'outline' ? 'Open scene' : 'Open plot', onclick: () => { location.hash = bookHref(id, tab === 'outline' ? 'manuscript' : 'outline', otherPath); } }
         : { label: tab === 'outline' ? 'Create scene file' : 'Create plot file', onclick: () => actions.createMissing(otherPath) },
+      { label: 'History of this file', disabled: !inThisTab, onclick: () => actions.history(path) },
       null,
       { label: 'Rename scene…', onclick: () => actions.renameScene(ch, s) },
       ...moveItems(names, s.name, (order) => actions.reorder(ch.name, order)),
@@ -322,11 +324,15 @@ function codexGroup(ctx, label, entries, { open = true, addKind, editable = true
       path: e.path,
       title: e.title,
       active: e.path === activePath,
-      menu: editable ? () => [
-        { label: 'Rename…', onclick: () => actions.renameCodex(e) },
-        null,
-        { label: 'Delete…', danger: true, onclick: () => actions.deleteCodex(e) },
-      ] : null,
+      menu: () => [
+        { label: 'History of this file', onclick: () => actions.history(e.path) },
+        ...(editable ? [
+          null,
+          { label: 'Rename…', onclick: () => actions.renameCodex(e) },
+          null,
+          { label: 'Delete…', danger: true, onclick: () => actions.deleteCodex(e) },
+        ] : []),
+      ],
     }));
   }
   if (!children.length) children.push(h('div', { class: 'empty-tree' }, 'None yet.'));

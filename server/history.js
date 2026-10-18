@@ -401,7 +401,8 @@ export async function restoreBook(root, { rev }) {
     await g(root, ['clean', '-f', '-d', '-q', '--', ':/']);
     if (!(await g(root, ['status', '--porcelain'])).trim()) return { committed: false, checkpoint: before, rev };
     await g(root, ['add', '-A']);
-    await g(root, ['commit', '-q', '-m', `Restore the book to ${short}\n\nRestored from: ${subject}`]);
+    const name = subject.length > 60 ? `${subject.slice(0, 57)}…` : subject;
+    await g(root, ['commit', '-q', '-m', `Restore the book to “${name}” (${short})\n\nEvery file was put back as it was at ${short}: ${subject}`]);
     return { committed: true, commit: (await g(root, ['rev-parse', '--short', 'HEAD'])).trim(), checkpoint: before, rev };
   });
 }

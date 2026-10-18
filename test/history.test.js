@@ -151,7 +151,7 @@ test('restoreFile writes an old version; restoreBook commits a snapshot on top',
   assert.equal(res.checkpoint.committed, true);
   assert.deepEqual(await listFiles(root), ['codex/x.md', 'manuscript/01-a/01-one.md']);
   assert.equal(await fs.readFile(path.join(root, 'codex/x.md'), 'utf8'), 'x1\n');
-  assert.match(subjects(root)[0], /^Restore the book to [0-9a-f]+$/);
+  assert.match(subjects(root)[0], /^Restore the book to “init” \([0-9a-f]+\)$/);
   assert.match(subjects(root)[1], /^Autosave:/); // the pending work was committed first
   assert.equal(gitIn(root, 'status', '--porcelain'), '');
 });

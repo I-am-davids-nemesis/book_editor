@@ -8,7 +8,9 @@ import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
-import { commitNamed, compare, push, status } from './history.js';
+import {
+  commitNamed, compare, fileDiff, graph, push, restoreBook, restoreFile, status,
+} from './history.js';
 import { buildImportMap } from './importmap.js';
 import { serialized } from './queue.js';
 import {
@@ -152,6 +154,30 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
 
   api.get('/books/:id/git/compare', async (req, res) => {
     res.json(await compare(await bookRoot(req), { from: req.query.from, to: req.query.to }));
+  });
+
+  api.get('/books/:id/git/graph', async (req, res) => {
+    const { limit, skip, path: filterPath } = req.query;
+    res.json(await graph(await bookRoot(req), { limit, skip, path: filterPath || undefined }));
+  });
+
+  api.get('/books/:id/git/file-diff', async (req, res) => {
+    const { from, to, path: rel, from_path: fromPath } = req.query;
+    res.json(await fileDiff(await bookRoot(req), { from, to, path: rel, from_path: fromPath || undefined }));
+  });
+
+  api.post('/books/:id/git/restore-file', async (req, res) => {
+    const root = await bookRoot(req);
+    const result = await restoreFile(root, { rev: req.body?.rev, path: req.body?.path });
+    autoCommitter.changed(root);
+    res.json(result);
+  });
+
+  api.post('/books/:id/git/restore-book', async (req, res) => {
+    const root = await bookRoot(req);
+    const result = await restoreBook(root, { rev: req.body?.rev });
+    autoCommitter.committed(root);
+    res.json(result);
   });
 
   // Runs a structure operation for the book in the route, one at a time.

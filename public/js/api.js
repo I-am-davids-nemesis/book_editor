@@ -33,6 +33,12 @@ export const api = {
   gitStatus: (id) => request('GET', `${book(id)}/git/status`),
   gitCommit: (id, message) => request('POST', `${book(id)}/git/commit`, { message }),
   gitPush: (id) => request('POST', `${book(id)}/git/push`),
+  gitGraph: (id, { limit, skip, path } = {}) =>
+    request('GET', `${book(id)}/git/graph?${new URLSearchParams(Object.entries({ limit, skip, path }).filter(([, v]) => v !== undefined && v !== null && v !== ''))}`),
+  gitFileDiff: (id, { from, to, path, fromPath }) =>
+    request('GET', `${book(id)}/git/file-diff?${new URLSearchParams(Object.entries({ from, to, path, from_path: fromPath }).filter(([, v]) => v))}`),
+  gitRestoreFile: (id, rev, path) => request('POST', `${book(id)}/git/restore-file`, { rev, path }),
+  gitRestoreBook: (id, rev) => request('POST', `${book(id)}/git/restore-book`, { rev }),
   gitCompare: (id, { from, to }) => request('GET', `${book(id)}/git/compare?${new URLSearchParams({ ...(from ? { from } : {}), to })}`),
 
   createBook: (title, remote) => request('POST', '/api/books', { title, remote }),
