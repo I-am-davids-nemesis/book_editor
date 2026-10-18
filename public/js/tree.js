@@ -40,6 +40,43 @@ export function findScene(tree, path) {
   return null;
 }
 
+// The plot file or scene shown beside `path` (null if it has none): a scene's
+// plot file, or a plot file's scene in the given mode. `exists` says whether
+// that file is on disk yet.
+export function companionOf(tree, path, mode) {
+  const hit = findScene(tree, path);
+  if (!hit) return null;
+  const { scene } = hit;
+  if (path.startsWith('manuscript/')) {
+    return { kind: 'plot', path: scene.outlinePath, exists: scene.inOutline, scene };
+  }
+  const file = sceneFile(scene, mode);
+  return { kind: 'scene', path: file ?? expectedSceneFile(scene, mode), exists: Boolean(file), mode, scene };
+}
+
+// Updates the tree's word counts for one manuscript file, the way the server
+// computes them, so the sidebar can follow typing. Returns the scene and
+// chapter it touched, or null when the file isn't a counted scene file.
+export function setFileWords(tree, path, words) {
+  const hit = path.startsWith('manuscript/') && findScene(tree, path);
+  if (!hit) return null;
+  const { ch, scene } = hit;
+  const variant = scene.variants.find((v) => v.path === path);
+  const mode = variant ? variant.variant : '';
+  const delta = words - (scene.wordsByMode[mode] || 0);
+  if (!delta) return hit;
+  if (variant) variant.words = words;
+  else scene.words = words;
+  scene.wordsByMode[mode] = words;
+  ch.wordsByMode[mode] = (ch.wordsByMode[mode] || 0) + delta;
+  tree.wordsByMode[mode] = (tree.wordsByMode[mode] || 0) + delta;
+  if (!variant) {
+    ch.words += delta;
+    tree.words += delta;
+  }
+  return hit;
+}
+
 // Renders one sidebar tab from the server's tree. Opening a file is a link
 // (navigation); everything that changes the book goes through `actions`,
 // which main.js supplies:

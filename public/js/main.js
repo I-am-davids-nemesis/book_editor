@@ -1,52 +1,55 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
-import { Editor } from './editor.js';
 import { renderLibrary } from './library.js';
-import { availableModes, findScene, modeLabel, renderTree, sceneFile, sceneFiles, tabForPath } from './tree.js';
+import { Pane } from './pane.js';
+import {
+  availableModes, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
+} from './tree.js';
 import { bookHref, formatCount, h, parseHash, toast } from './ui.js';
-import { countWords } from './wordcount.js';
 
 const view = document.getElementById('view');
 const crumb = document.getElementById('crumb');
 
 const TAB_LABELS = { manuscript: 'Manuscript', outline: 'Outline', codex: 'Codex' };
-
-// Edits are written to disk after a short pause in typing, and at least this
-// often while typing continues. Commits happen on the server: when you switch
-// files, and 30 minutes after the first uncommitted change at the latest.
-const AUTOSAVE_IDLE_MS = 1000;
-const AUTOSAVE_MAX_WAIT_MS = 5000;
-const AUTOSAVE_RETRY_MS = 10000;
+const NOTHING_OPEN = 'Choose a scene, plot file or codex entry on the left.';
 
 // The book screen is built once per book and updated as the route changes.
+// It has two panes: the main one shows the file in the address bar, the side
+// one shows its companion (a scene's plot file, or a plot file's scene).
 class BookView {
   constructor(id) {
     this.id = id;
     this.book = null;
     this.tree = null;
     this.tab = 'manuscript';
-    this.file = null; // { path, hash }
-    this.saving = null;
-    this.conflicted = false; // a save hit a conflict; autosave waits for the banner
-    this.autosaveTimer = null;
-    this.firstUnsavedAt = 0;
-    this.saveFailed = false; // retry slowly, and toast once, while saves fail
+    this.showCompanion = readStored('companion') !== 'off';
+    this.companion = null;
 
     this.tabButtons = Object.entries(TAB_LABELS).map(([tab, label]) =>
       h('button', { type: 'button', role: 'tab', 'data-tab': tab, onclick: () => this.showTab(tab) }, label));
     this.treeEl = h('nav', { class: 'tree', 'aria-label': 'Book contents' });
     this.totalEl = h('div', { class: 'sidebar-foot' });
 
-    this.titleEl = h('span', { class: 'file-title' });
-    this.pathEl = h('span', { class: 'file-path' });
-    this.modeSwitchEl = h('span', { class: 'mode-switch', role: 'group', 'aria-label': 'Narration mode', hidden: true });
-    this.dirtyEl = h('span', { class: 'dirty-dot', title: 'Unsaved changes', hidden: true });
-    this.saveBtn = h('button', { type: 'button', onclick: () => this.save(), disabled: true, title: 'Save now (⌘S). Edits also save by themselves after a second.' }, 'Save');
-    this.bannerEl = h('div', { class: 'banner', hidden: true });
-    this.hostEl = h('div', { class: 'editor-host', hidden: true });
-    this.placeholderEl = h('div', { class: 'placeholder' }, 'Choose a scene, plot file or codex entry on the left.');
+    this.modeSwitchEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode', hidden: true });
+    this.companionBtn = h('button', { type: 'button', class: 'companion-toggle', hidden: true, onclick: () => this.toggleCompanion() });
+
+    const paneOptions = (role) => ({
+      bookId: id,
+      role,
+      view: readStored(`view:${role}`) || 'edit',
+      onChange: (pane) => this.paneChanged(pane),
+      onView: (v) => writeStored(`view:${role}`, v),
+    });
+    this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn] });
+    this.sideModeEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode of the scene', hidden: true });
+    this.side = new Pane({ ...paneOptions('side'), headExtras: [this.sideModeEl] });
+    this.main.close(NOTHING_OPEN);
+
+    this.dividerEl = h('div', { class: 'pane-divider', role: 'separator', 'aria-orientation': 'vertical', title: 'Drag to resize' });
+    this.panesEl = h('div', { class: 'panes' }, this.main.el, this.dividerEl, this.side.el);
     this.wordsEl = h('span');
-    this.stateEl = h('span');
+    this.sideWordsEl = h('span');
+    this.chapterWordsEl = h('span');
     this.commitEl = h('span', { class: 'commit-state' });
 
     this.el = h('div', { class: 'book' },
@@ -55,16 +58,13 @@ class BookView {
         this.treeEl,
         this.totalEl),
       h('section', { class: 'editor-area' },
-        h('div', { class: 'editor-head' }, this.dirtyEl, this.titleEl, this.modeSwitchEl, this.pathEl, this.saveBtn),
-        this.bannerEl,
-        this.hostEl,
-        this.placeholderEl,
-        h('div', { class: 'statusbar' }, this.wordsEl, h('span', { class: 'spacer' }), this.commitEl, this.stateEl)));
+        this.panesEl,
+        h('div', { class: 'statusbar' },
+          this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.commitEl)));
 
-    this.editor = new Editor(this.hostEl, {
-      onChange: () => { this.updateStatus(); this.scheduleAutosave(); },
-      onSave: () => this.save(),
-    });
+    this.setSideVisible(false);
+    this.setSplit(Number(readStored('split')) || 0.5);
+    this.initResize();
   }
 
   async init() {
@@ -74,6 +74,25 @@ class BookView {
     this.mode = this.validMode(readStored(`mode:${this.id}`));
   }
 
+  get file() {
+    return this.main.file;
+  }
+
+  get dirty() {
+    return this.main.dirty || this.side.dirty;
+  }
+
+  // Resolves true when both panes are saved.
+  async save() {
+    const results = await Promise.all([this.main.save(), this.side.save()]);
+    return results.every(Boolean);
+  }
+
+  saveOnExit() {
+    this.main.saveOnExit();
+    this.side.saveOnExit();
+  }
+
   // --- narration modes -------------------------------------------------------
 
   validMode(mode) {
@@ -81,15 +100,30 @@ class BookView {
     return modes.includes(mode) ? mode : modes[0];
   }
 
-  setMode(mode, { follow = true } = {}) {
+  async setMode(mode, { follow = true } = {}) {
     this.mode = this.validMode(mode);
     writeStored(`mode:${this.id}`, this.mode);
     this.renderTree();
-    // Show the same scene in the new mode, if it exists.
-    const hit = follow && this.file && findScene(this.tree, this.file.path);
-    if (hit && this.file.path.startsWith('manuscript/')) {
+    const path = this.file?.path;
+    const hit = follow && path && findScene(this.tree, path);
+    if (hit && path.startsWith('manuscript/')) {
+      // Show the same scene in the new mode, if it exists.
       const target = sceneFile(hit.scene, this.mode);
-      if (target && target !== this.file.path) this.open('manuscript', target);
+      if (target && target !== path) this.open('manuscript', target);
+    } else if (hit) {
+      // A plot file is open: the scene beside it follows the mode.
+      await this.syncSide();
+    }
+  }
+
+  // Opening a scene in some mode makes that the sidebar's mode.
+  adoptModeOf(path) {
+    const hit = path.startsWith('manuscript/') && findScene(this.tree, path);
+    if (!hit) return;
+    const m = hit.scene.variants.find((v) => v.path === path)?.variant ?? '';
+    if (m !== this.mode && availableModes(this.tree).includes(m)) {
+      this.mode = m;
+      writeStored(`mode:${this.id}`, m);
     }
   }
 
@@ -117,19 +151,25 @@ class BookView {
     this.modeSwitchEl.hidden = false;
   }
 
-  get dirty() {
-    return Boolean(this.file) && this.editor.dirty;
-  }
+  // --- routing ---------------------------------------------------------------
 
   async route({ tab, path }) {
     const nextTab = tab && TAB_LABELS[tab] ? tab : (path ? tabForPath(path) : this.tab);
     const previous = this.file?.path ?? null;
-    if (path !== previous) {
-      if (path) await this.openFile(path);
-      else this.closeFile();
+    const changed = path !== previous;
+    if (changed) {
+      if (path) {
+        await this.main.open(path);
+        this.adoptModeOf(this.main.file.path);
+      } else {
+        this.main.close(NOTHING_OPEN);
+      }
       if (previous) this.checkpoint(`switched away from ${previous}`);
     }
     this.showTab(nextTab, { updateHash: false });
+    await this.syncSide();
+    this.updateStatus();
+    if (changed && path) this.main.focus();
   }
 
   showTab(tab, { updateHash = true } = {}) {
@@ -142,100 +182,167 @@ class BookView {
   renderTree() {
     this.mode = this.validMode(this.mode);
     renderTree(this.treeEl, this.tree, { id: this.id, tab: this.tab, activePath: this.file?.path, actions: this.actions, mode: this.mode });
+    this.renderTotal();
+    this.renderModeSwitch();
+  }
+
+  renderTotal() {
     const words = this.tree.wordsByMode[this.mode] || 0;
     const which = availableModes(this.tree).length > 1 ? ` (${modeLabel(this.mode)})` : '';
     this.totalEl.textContent = `${formatCount(words)} words in the manuscript${which}`;
-    this.renderModeSwitch();
   }
 
   async refreshTree() {
     this.tree = await api.getTree(this.id);
+    // Unsaved typing isn't on disk yet; keep the live counts.
+    for (const pane of [this.main, this.side]) {
+      if (pane.dirty) setFileWords(this.tree, pane.file.path, pane.words);
+    }
     this.renderTree();
   }
 
-  async openFile(path) {
-    const file = await api.readFile(this.id, path);
-    this.file = { path: file.path, hash: file.hash };
-    // Opening a scene in some mode makes that the sidebar's mode.
-    const hit = file.path.startsWith('manuscript/') && findScene(this.tree, file.path);
-    if (hit) {
-      const m = hit.scene.variants.find((v) => v.path === file.path)?.variant ?? '';
-      if (m !== this.mode && availableModes(this.tree).includes(m)) {
-        this.mode = m;
-        writeStored(`mode:${this.id}`, m);
-      }
+  open(tab, path) {
+    location.hash = bookHref(this.id, tab, path);
+  }
+
+  // --- the side pane -----------------------------------------------------------
+
+  toggleCompanion() {
+    this.showCompanion = !this.showCompanion;
+    writeStored('companion', this.showCompanion ? 'on' : 'off');
+    this.syncSide().then(() => this.updateStatus());
+  }
+
+  setSideVisible(visible) {
+    this.side.el.hidden = !visible;
+    this.dividerEl.hidden = !visible;
+    this.panesEl.classList.toggle('single', !visible);
+  }
+
+  // Puts the open file's companion in the side pane (or hides it).
+  async syncSide() {
+    const path = this.file?.path;
+    const c = path && this.tree ? companionOf(this.tree, path, this.mode) : null;
+    this.companion = c;
+    const what = c?.kind === 'plot' ? 'plot' : 'scene';
+    this.companionBtn.hidden = !c;
+    this.companionBtn.textContent = c?.kind === 'plot' ? 'Plot' : 'Scene';
+    this.companionBtn.setAttribute('aria-pressed', String(this.showCompanion));
+    this.companionBtn.title = `${this.showCompanion ? 'Hide' : 'Show'} the ${what} beside this file`;
+
+    if (!c || !this.showCompanion) {
+      this.sideModeEl.hidden = true;
+      if (!(await this.side.save())) return; // keep it open (with its banner) until saved
+      this.side.close();
+      this.setSideVisible(false);
+      return;
     }
-    clearTimeout(this.autosaveTimer);
-    this.firstUnsavedAt = 0;
-    this.editor.load(file.content);
-    this.hideBanner();
-    this.hostEl.hidden = false;
-    this.placeholderEl.hidden = true;
-    this.showFileHeader();
-    this.updateStatus();
-    this.editor.focus();
+    this.setSideVisible(true);
+    const modes = availableModes(this.tree);
+    const multiMode = modes.length > 1;
+    this.side.setLabel(c.kind === 'plot' ? 'Plot' : 'Scene');
+    // Beside a plot file, the scene can be flipped between modes here too.
+    this.sideModeEl.hidden = !(c.kind === 'scene' && multiMode);
+    this.sideModeEl.replaceChildren(...(this.sideModeEl.hidden ? [] : modes.map((m) => h('button', {
+      type: 'button',
+      'aria-pressed': String(m === c.mode),
+      title: sceneFile(c.scene, m) ? `Show the ${modeLabel(m)} version` : `No ${modeLabel(m)} version yet`,
+      onclick: () => { if (m !== this.mode) this.setMode(m); },
+    }, modeLabel(m)))));
+    if (this.side.file?.path === c.path) return;
+    if (!(await this.side.save())) return;
+    if (!c.exists) {
+      const missing = c.kind === 'plot' ? 'This scene has no plot file yet.'
+        : multiMode ? `This scene has no ${modeLabel(c.mode)} version yet.` : 'This plot has no scene file yet.';
+      this.side.close(missing, [
+        h('button', { type: 'button', onclick: () => this.createCompanion(c.path) },
+          c.kind === 'plot' ? 'Create plot file' : 'Create scene file'),
+      ]);
+      this.side.pathEl.textContent = c.path;
+      return;
+    }
+    try {
+      await this.side.open(c.path);
+    } catch (err) {
+      this.side.close(`Could not open ${c.path}: ${err.message}`);
+    }
   }
 
-  showFileHeader() {
-    const path = this.file?.path ?? '';
-    this.titleEl.textContent = path.split('/').pop().replace(/\.md$/i, '');
-    this.pathEl.textContent = path;
-    if (this.tree) this.renderModeSwitch();
+  async createCompanion(path) {
+    const res = await this.runOp(() => api.createMissing(this.id, path));
+    if (res) this.updateStatus();
   }
 
-  closeFile() {
-    clearTimeout(this.autosaveTimer);
-    this.file = null;
-    this.editor.load('');
-    this.hideBanner();
-    this.hostEl.hidden = true;
-    this.placeholderEl.hidden = false;
-    this.showFileHeader();
-    this.updateStatus();
+  // Lets the divider between the panes be dragged.
+  initResize() {
+    this.dividerEl.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.dividerEl.setPointerCapture(e.pointerId);
+      this.panesEl.classList.add('resizing');
+      const move = (ev) => {
+        const r = this.panesEl.getBoundingClientRect();
+        const column = getComputedStyle(this.panesEl).flexDirection === 'column';
+        const f = column ? (ev.clientY - r.top) / r.height : (ev.clientX - r.left) / r.width;
+        this.setSplit(f);
+      };
+      const up = () => {
+        this.dividerEl.removeEventListener('pointermove', move);
+        this.dividerEl.removeEventListener('pointerup', up);
+        this.panesEl.classList.remove('resizing');
+        writeStored('split', String(this.split));
+      };
+      this.dividerEl.addEventListener('pointermove', move);
+      this.dividerEl.addEventListener('pointerup', up);
+    });
+    this.dividerEl.addEventListener('dblclick', () => {
+      this.setSplit(0.5);
+      writeStored('split', '0.5');
+    });
+  }
+
+  setSplit(f) {
+    this.split = Math.min(0.8, Math.max(0.2, Number.isFinite(f) ? f : 0.5));
+    this.main.el.style.flex = `${this.split} 1 0`;
+    this.side.el.style.flex = `${1 - this.split} 1 0`;
+  }
+
+  // --- word counts and status ----------------------------------------------------
+
+  paneChanged(pane) {
+    clearTimeout(this.countTimer);
+    this.countTimer = setTimeout(() => {
+      this.liveWords(pane);
+      this.updateStatus();
+    }, 150);
+  }
+
+  // Updates the sidebar's counts for a scene being typed in.
+  liveWords(pane) {
+    const path = pane.file?.path;
+    const hit = path && setFileWords(this.tree, path, pane.words);
+    if (!hit) return;
+    this.renderTotal();
+    if (this.tab !== 'manuscript') return;
+    const { ch, scene } = hit;
+    const find = (selector, test) => [...this.treeEl.querySelectorAll(selector)].find(test);
+    const row = find('.item', (el) => el.dataset.path === path)?.querySelector('.count');
+    if (row && sceneFile(scene, this.mode) === path) row.textContent = formatCount(scene.wordsByMode[this.mode] || 0);
+    const chapter = find('details.chapter', (el) => el.dataset.chapter === ch.name)?.querySelector(':scope > summary .count');
+    if (chapter) chapter.textContent = formatCount(ch.wordsByMode[this.mode] || 0);
   }
 
   updateStatus() {
-    const dirty = this.dirty;
-    this.dirtyEl.hidden = !dirty;
-    this.saveBtn.disabled = !dirty;
-    if (!this.file) {
-      this.wordsEl.textContent = '';
-      this.stateEl.textContent = '';
-      return;
-    }
-    clearTimeout(this.countTimer);
-    this.countTimer = setTimeout(() => {
-      this.wordsEl.textContent = `${formatCount(countWords(this.editor.content))} words`;
-    }, 150);
-    this.stateEl.textContent = this.saving ? 'Saving…'
-      : !dirty ? 'Saved'
-      : this.conflicted ? 'Not saved: changed on disk'
-      : this.saveFailed ? 'Not saved: retrying'
-      : 'Unsaved changes';
-  }
-
-  // --- saving and committing -------------------------------------------------
-
-  scheduleAutosave() {
-    clearTimeout(this.autosaveTimer);
-    this.autosaveTimer = null;
-    if (!this.dirty || this.conflicted) {
-      this.firstUnsavedAt = 0;
-      return;
-    }
-    const now = Date.now();
-    this.firstUnsavedAt ||= now;
-    const delay = this.saveFailed
-      ? AUTOSAVE_RETRY_MS
-      : Math.max(0, Math.min(AUTOSAVE_IDLE_MS, this.firstUnsavedAt + AUTOSAVE_MAX_WAIT_MS - now));
-    this.autosaveTimer = setTimeout(() => {
-      this.autosaveTimer = null;
-      this.save();
-    }, delay);
+    const main = this.main.file;
+    this.wordsEl.textContent = main ? `${formatCount(this.main.words)} words` : '';
+    const side = this.side.file && !this.side.el.hidden;
+    this.sideWordsEl.textContent = side ? `${this.companion?.kind === 'plot' ? 'Plot' : 'Scene'}: ${formatCount(this.side.words)} words` : '';
+    const hit = main?.path.startsWith('manuscript/') && findScene(this.tree, main.path);
+    const mode = hit ? (hit.scene.variants.find((v) => v.path === main.path)?.variant ?? '') : '';
+    this.chapterWordsEl.textContent = hit ? `Chapter: ${formatCount(hit.ch.wordsByMode[mode] || 0)} words` : '';
   }
 
   // Asks the server to commit everything that changed in the book. Never
-  // blocks editing; a failure shows once in the status bar.
+  // blocks editing; a failure shows in the status bar.
   async checkpoint(reason) {
     try {
       const res = await api.checkpoint(this.id, reason);
@@ -252,60 +359,10 @@ class BookView {
     }
   }
 
-  // Resolves true when the file is saved (or there was nothing to save).
-  // Last-chance write when the page goes away; the server's timer (or its
-  // shutdown) commits it later.
-  saveOnExit() {
-    if (!this.dirty) return;
-    api.writeFile(this.id, this.file.path, this.editor.content, this.file.hash, false, { keepalive: true }).catch(() => {});
-  }
-
-  async save({ force = false } = {}) {
-    if (!this.file || (!this.dirty && !force)) return true;
-    if (this.saving) {
-      // Typing may have continued while that save was in flight.
-      if (!(await this.saving)) return false;
-      return this.save({ force });
-    }
-    clearTimeout(this.autosaveTimer);
-    this.autosaveTimer = null;
-    this.firstUnsavedAt = 0;
-    const { path, hash } = this.file;
-    const content = this.editor.content;
-    this.saving = (async () => {
-      this.updateStatus();
-      try {
-        const res = await api.writeFile(this.id, path, content, hash, force);
-        if (this.file?.path === path) {
-          this.file.hash = res.hash;
-          this.editor.markSaved(content);
-          this.hideBanner();
-        }
-        this.saveFailed = false;
-        this.refreshTree().catch(() => {});
-        return true;
-      } catch (err) {
-        if (err.status === 409) {
-          this.conflicted = true;
-          this.showConflict(err.data);
-        } else {
-          if (!this.saveFailed) toast(`Could not save: ${err.message}`, { error: true });
-          this.saveFailed = true;
-        }
-        return false;
-      } finally {
-        this.saving = null;
-        this.updateStatus();
-        this.scheduleAutosave();
-      }
-    })();
-    return this.saving;
-  }
-
   // --- structure changes ------------------------------------------------------
 
-  // Saves the open file, runs a structure change, then follows the open file
-  // if it moved (or closes it if it was deleted) and refreshes the tree.
+  // Saves the open files, runs a structure change, then follows the open
+  // files if they moved (or closes them if deleted) and refreshes the tree.
   async runOp(fn) {
     if (this.dirty && !(await this.save())) return null;
     let res;
@@ -318,28 +375,20 @@ class BookView {
     }
     this.followChanges(res);
     await this.refreshTree();
+    await this.syncSide();
+    this.updateStatus();
     return res;
   }
 
-  followChanges({ moves = [], deleted = [] }) {
-    const p = this.file?.path;
-    if (!p) return;
-    const under = (base) => p === base || p.startsWith(`${base}/`);
-    if (deleted.some(under)) {
-      this.closeFile();
+  followChanges(res) {
+    this.side.follow(res);
+    const outcome = this.main.follow(res);
+    if (outcome === 'deleted') {
+      this.main.close(NOTHING_OPEN);
       history.replaceState(null, '', bookHref(this.id, this.tab));
-      return;
-    }
-    const m = moves.find((mv) => under(mv.from));
-    if (m) {
-      this.file.path = m.to + p.slice(m.from.length);
-      this.showFileHeader();
+    } else if (outcome === 'moved') {
       history.replaceState(null, '', bookHref(this.id, this.tab, this.file.path));
     }
-  }
-
-  open(tab, path) {
-    location.hash = bookHref(this.id, tab, path);
   }
 
   get actions() {
@@ -454,38 +503,6 @@ class BookView {
         if (ok) await this.runOp(() => api.deleteCodex(id, entry.path));
       },
     };
-  }
-
-  showConflict(data) {
-    const gone = data.diskContent === null;
-    this.showBanner(
-      gone
-        ? 'This file was deleted or moved on disk since you opened it.'
-        : 'This file changed on disk since you opened it. Your edits are still here.',
-      [
-        !gone && h('button', { type: 'button', onclick: () => this.reloadFromDisk(data) }, 'Discard mine, load disk version'),
-        h('button', { type: 'button', class: 'primary', onclick: () => this.save({ force: true }) },
-          gone ? 'Save mine again' : 'Overwrite with mine'),
-      ],
-    );
-  }
-
-  reloadFromDisk({ diskContent, diskHash }) {
-    this.file.hash = diskHash;
-    this.editor.load(diskContent, { keepSelection: true });
-    this.hideBanner();
-    this.updateStatus();
-  }
-
-  showBanner(message, buttons) {
-    this.bannerEl.replaceChildren(h('span', { class: 'msg' }, message), ...buttons.filter(Boolean));
-    this.bannerEl.hidden = false;
-  }
-
-  hideBanner() {
-    this.conflicted = false;
-    this.bannerEl.hidden = true;
-    this.bannerEl.replaceChildren();
   }
 }
 

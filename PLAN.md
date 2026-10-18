@@ -78,6 +78,8 @@ local_editor/
     codex.js              # add character, location, note from templates
     files.js              # read/write with content hash for conflict detection
     git.js                # execFile wrapper: status, commit, push, log, show, diff, restore
+    autocommit.js         # checkpoint commits: on file switch, 30-min timer, shutdown
+    queue.js              # one job at a time per book (structure changes, commits)
     watch.js              # fs.watch(recursive) per open book → SSE events (debounced, ignores .git)
     compile.js            # join scenes into a chapter or book .md
   templates/book/         # scaffold copied into every new book
@@ -91,8 +93,7 @@ local_editor/
       library.js          # book list, New book / Open path dialogs
       tree.js             # sidebar: Manuscript | Outline | Codex tabs, + buttons, drag reorder
       editor.js           # CodeMirror 6 setup (markdown, line wrap, Cmd+S)
-      preview.js          # marked rendering, toggle
-      panes.js            # single / split (scene + plot) layout
+      pane.js             # one open file: editor, Edit/Split/Preview, autosave, conflict banner
       gitpanel.js         # changed files, message, Commit, Push
       history.js          # per-file log, diff view, restore
       dialogs.js          # prompt/confirm modals
@@ -126,6 +127,10 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
 | GET | `/:id/git/show?path=&rev=` | File content at a commit |
 | GET | `/:id/git/diff?path=&rev=` | Unified diff (rev vs. its parent, or working copy vs. HEAD) |
 | POST | `/:id/git/restore` | `{path, rev}` → writes the old content to the working copy (uncommitted) |
+| GET | `/:id/git/graph?limit=&before=` | Commits across all branches, newest first: `{hash, parents, subject, body, author, date, refs, files, auto}` |
+| GET | `/:id/git/compare?from=&to=&path=` | Changed files between two commits, or one file's diff |
+| POST | `/:id/git/branch` | `{name, from}` → create a branch (a "draft") and switch to it, after a checkpoint commit |
+| POST | `/:id/git/switch` | `{branch}` → checkpoint, then switch; open panes reload |
 | POST | `/:id/compile` | `{scope: book\|chapter, chapter?}` → writes `compiled/…md`, returns content |
 | GET | `/api/events?book=` | SSE stream: `{type: changed\|added\|removed, path}` |
 
@@ -147,7 +152,7 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
   - *Codex:* groups for Characters, Locations and Notes, with **+ Character**, **+ Location** and **+ Note**.
 - **Editor area:** opening a scene shows it with its plot file in a split pane (toggleable). Each pane has an Edit / Preview / Split toggle. Saving is Cmd+S, plus autosave after 1 s idle (done early, see Git above). Dirty state shows in the tab and the tree, and there's a `beforeunload` guard.
 - **Git panel (drawer):** changed files with status letters (click one to see its diff), a message box, **Commit**, and **Push** if a remote exists.
-- **History view:** the commit list for a file, a diff of the selected commit, and **Restore this version**.
+- **History view:** see §10. The ⋯ menu's History item opens it filtered to one file.
 
 ## 6. Build order
 
@@ -155,11 +160,12 @@ Each milestone ends with something usable, and gets tests before moving on.
 
 1. ✅ **Skeleton.** Add `package.json`, Express, static files and the import map for CodeMirror. Then config and library listing, register-by-path, the tree endpoint, and file read/write with path guarding. On the frontend: library screen, sidebar tree and CodeMirror editor with Cmd+S. *Check:* open a hand-made book folder and edit a scene.
 2. ✅ **Book creation and structure.** Add the scaffold templates, New book (with git init, initial commit and optional remote), add and rename chapters and scenes with the outline mirror, delete, and reorder with renumbering. Add the codex buttons with templates, and mismatch detection with "Create missing". *Tests:* reorder and renumber edge cases (swap, move to the end, width growth, untracked files), and path traversal attempts.
-3. **Writing experience.** Add the scene + plot split pane, preview toggle, autosave, dirty-state handling, and word counts (server and live).
-4. **Git.** Add the status, Commit panel and Push, then history, diff rendering and restore. *Tests:* commit and log flow in a temp repo; the no-identity error path.
+3. ✅ **Writing experience.** Add the scene + plot split pane, preview toggle, autosave, dirty-state handling, and word counts (server and live).
+4. **Git.** Add the status, Commit panel ("Save revision", for named milestones) and Push. Then the **History view** (§10): a commit graph of the whole book, with diffs, compare and restore. Branches ("try a stormier opening") come last in this step. *Tests:* commit and log flow in a temp repo; graph lane layout for merges and several branches; the grouping of autosave runs; restore of a file and of the whole book; the no-identity error path.
 5. **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. **Compile.** Compile a chapter or the whole book, then download.
 7. **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.
+8. **Claude Code.** Run Claude Code from the browser in the book's folder and stream its work back into a Claude panel (design in §9). This comes after live reload (step 5), so edits it makes show up in the open panes, and after git (step 4), so each run's changes can be reviewed as a diff. *Tests:* a fake agent stream (no real model calls) for streaming, approval round-trips, stop, and the before/after commits; a path check refusing writes outside the book. *Check:* ask it to draft a scene from its plot file while the plot is open, and watch the scene fill in.
 
 ## 7. Testing
 
@@ -172,5 +178,71 @@ Each milestone ends with something usable, and gets tests before moving on.
 - Scene variants (`01-opening.camera.md`), with a switcher and side-by-side compare.
 - Moving scenes between chapters by drag and drop.
 - `[[wikilink]]` autocomplete and click-through to codex entries.
-- Branches, tags and milestones in the git panel.
+- Tags, and merging one branch's changes into another from the History view.
 - Full-text search across the book.
+
+## 9. Claude Code integration (step 8)
+
+**Backend.** `server/claude.js` drives Claude Code through the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`), which uses your existing Claude Code login. The SDK is preferred over spawning `claude -p --output-format stream-json`, because its permission callback lets the browser approve tool calls. Each run:
+
+- runs with `cwd` set to the book root and loads project settings, so the book's `CLAUDE.md` / `AGENTS.md` apply;
+- gets the editor's context with the prompt: the open file and its companion, the narration mode, and the selected text if any;
+- streams SDK messages to the browser over SSE (text as it arrives, short tool-call summaries, approval requests, and the final result with its cost);
+- resumes the book's previous session for follow-ups, unless you start a new conversation. Session ids are kept in the editor's config directory, not in the book.
+
+**Permissions.**
+- Read, Glob and Grep are allowed.
+- Edit and Write are allowed only for paths inside the book. Anything else is refused in the permission callback, whatever the model asks.
+- Bash and web tools are off by default. A per-book setting can switch them to "ask".
+- In "ask" mode, each request shows in the panel as an Allow / Deny card.
+
+**Git and saving.**
+- Before a run, the editor saves both panes and takes a checkpoint commit, so the agent's changes are separate from yours.
+- After the run, the server commits them as `Claude: <first line of the prompt>`, with the run's file list in the body.
+- The panel lists the changed files, each linking to its diff (step 4). Reverting a run is a restore to the checkpoint.
+- Files changed during a run reload in the panes through live reload (step 5). A pane with unsaved typing gets the usual conflict banner instead.
+
+**Routes.**
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| POST | `/:id/claude/runs` | `{prompt, context, newSession?}` → `{runId}`; one run per book at a time |
+| GET | `/:id/claude/runs/:run/events` | SSE: `text`, `tool`, `permission`, `files`, `result`, `error` |
+| POST | `/:id/claude/runs/:run/permission` | `{requestId, allow}` |
+| POST | `/:id/claude/runs/:run/stop` | Abort the run (changes so far are still committed) |
+| GET | `/:id/claude/session` | The current conversation's transcript, to restore the panel on reload |
+
+**UI.**
+- A **Claude** drawer docks to the right of the panes. It has the transcript, a prompt box, chips for what's attached (scene, plot, selection; each can be removed), **Stop**, **New conversation** and approval cards.
+- Optional quick prompts: "Draft this scene from its plot", "Write the other mode's version", "Check this scene against the codex".
+
+**Security.** These are the most powerful routes the server has. They keep the existing localhost Host/Origin check and the JSON-only bodies. They also require a per-server random token, which is embedded in the page and sent as a header, so no other local page can start a run.
+
+## 10. History view (part of step 4)
+
+The model is the revision tree in [prose-graph](https://prose-graph.lovable.app/project/p1): the book's history shown as save points on a graph, in a writer's words rather than git's. Unlike that design, it shows real branch lines, since books here can branch.
+
+**Opening it.** A **History** button in the top bar, and the commit count in the status bar, open it as a full-width view over the panes. Esc or **Back to writing** closes it. The address is `#/book/<id>/history[/<commit>]`, so a commit can be linked to. It opens filtered to one file from a scene's ⋯ menu.
+
+**The graph (left column).**
+- Commits from newest to oldest, one row each, with the lanes drawn as an SVG strip: a dot per commit and a colored line per branch. Merges and forks curve between lanes.
+- The server returns parents; the client lays out the lanes, a straightforward pass over the topologically ordered list.
+- Each row shows the subject (or a friendlier label), the relative date, branch and tag chips (the current branch is marked "you are here"), and the file count.
+- **Autosave runs collapse.** Consecutive `Autosave:` commits on one branch fold into one row, such as "14 autosaves · 2:10–4:35 pm · 3 scenes". It expands on click. Named commits (manual "Save revision", `Claude: …` runs, structure changes) always show on their own, bolder.
+- A filter box (subject or file path) and a toggle for "named save points only". History is paged with *Load older*.
+
+**The details (right column).**
+- *One commit selected:* its message, time, and changed files grouped by Manuscript / Outline / Codex, with words added or removed per scene. Clicking a file shows its diff. The diff is word-level for prose (changed words highlighted inside wrapped paragraphs), with a line diff for other files.
+- *Two commits selected* (shift-click, or the **Compare** button and then a second click): the same, for everything between them. This answers "what changed in chapter 2 since the editor pass?"
+- Actions:
+  - **Restore this file**, which writes that version to the working copy.
+  - **Restore whole book to here**, which takes a checkpoint commit first and then makes a new commit with that snapshot, so nothing is lost.
+  - **Open as read-only**, which shows that version of the file in the side pane next to the current text.
+  - **Start a draft from here**, which creates a branch.
+
+**Drafts (branches).**
+- A branch is presented as a "draft": a named line of work, such as "stormier opening".
+- Creating or switching a draft first takes a checkpoint commit, then runs `git switch`. Open panes reload, and the sidebar shows the draft's name.
+- Auto-commits go to whichever draft is current.
+- Merging drafts is left for later. Until then, you bring a draft's changes back by restoring individual files.
+

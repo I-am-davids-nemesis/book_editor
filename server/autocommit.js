@@ -41,6 +41,7 @@ export class AutoCommitter {
     this.intervalMs = intervalMs;
     this.log = log;
     this.timers = new Map();
+    this.running = new Set(); // commits in progress, so shutdown can wait for them
   }
 
   changed(root) {
@@ -56,13 +57,19 @@ export class AutoCommitter {
   async commit(root, reason) {
     clearTimeout(this.timers.get(root));
     this.timers.delete(root);
-    return checkpoint(root, reason);
+    const run = checkpoint(root, reason);
+    this.running.add(run);
+    run.finally(() => this.running.delete(run)).catch(() => {});
+    return run;
   }
 
-  // Commits every book with pending changes (on shutdown).
+  // Commits every book with pending changes, and lets commits already under
+  // way finish (on shutdown).
   async flush(reason = 'editor shut down') {
     const roots = [...this.timers.keys()];
+    const running = [...this.running];
     const results = await Promise.allSettled(roots.map((root) => this.commit(root, reason)));
+    await Promise.allSettled(running);
     results.forEach((r, i) => {
       if (r.status === 'rejected') this.log.error(`Auto-commit failed in ${roots[i]}: ${r.reason.message}`);
     });

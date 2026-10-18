@@ -80,3 +80,13 @@ test('AutoCommitter.commit stops the clock, and flush commits pending books', as
   assert.equal(committer.timers.size, 0);
   assert.equal(log(two)[0], 'Autosave: Edit b');
 });
+
+test('flush waits for a commit that is already running', async () => {
+  const root = await gitBook({ 'a.md': 'x\n' });
+  const committer = new AutoCommitter({ intervalMs: 60_000 });
+  await writeFiles(root, { 'a.md': 'y\n' });
+  committer.commit(root, 'switched files'); // not awaited, like the editor's request
+  await committer.flush();
+  assert.equal(gitIn(root, 'status', '--porcelain'), '');
+  assert.equal(log(root)[0], 'Autosave: Edit a');
+});
