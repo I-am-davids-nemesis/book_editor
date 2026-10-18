@@ -160,3 +160,23 @@ test('concurrent structure changes are applied one at a time', async () => {
   const tree = (await call('GET', `/api/books/${id}/tree`)).data;
   assert.deepEqual(tree.chapters[0].scenes.map((s) => s.prefix), [1, 2, 3, 4, 5]);
 });
+
+test('git status, named commit and compare over HTTP', async () => {
+  const created = await call('POST', '/api/books', { title: 'Revisions' });
+  const id = created.data.id;
+  const root = path.join(library, id);
+  await call('POST', `/api/books/${id}/chapters`, { title: 'First' });
+  const st = await call('GET', `/api/books/${id}/git/status`);
+  assert.equal(st.data.branch, 'main');
+  assert.ok(st.data.files.some((f) => f.path === 'outline/01-first/_chapter.md'));
+  const cmp = await call('GET', `/api/books/${id}/git/compare?to=worktree`);
+  assert.ok(cmp.data.files.some((f) => f.path === 'outline/01-first/_chapter.md' && f.status === 'A'));
+  assert.equal((await call('POST', `/api/books/${id}/git/commit`, { message: '' })).status, 400);
+  const c = await call('POST', `/api/books/${id}/git/commit`, { message: 'First chapter' });
+  assert.equal(c.status, 200);
+  assert.equal(gitIn(root, 'log', '-1', '--format=%s').trim(), 'First chapter');
+  assert.equal((await call('POST', `/api/books/${id}/git/commit`, { message: 'Again' })).status, 409);
+  assert.equal((await call('POST', `/api/books/${id}/git/push`)).status, 409);
+  assert.equal((await call('GET', `/api/books/${id}/git/compare?to=${encodeURIComponent('--all')}`)).status, 400);
+});
+

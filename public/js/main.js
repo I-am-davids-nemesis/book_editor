@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
+import { openRevisionPanel } from './gitpanel.js';
 import { renderLibrary } from './library.js';
 import { Pane } from './pane.js';
 import {
@@ -39,6 +40,7 @@ class BookView {
       view: readStored(`view:${role}`) || 'edit',
       onChange: (pane) => this.paneChanged(pane),
       onView: (v) => writeStored(`view:${role}`, v),
+      onSaved: () => this.refreshGit(),
     });
     this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn] });
     this.sideModeEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode of the scene', hidden: true });
@@ -51,6 +53,7 @@ class BookView {
     this.sideWordsEl = h('span');
     this.chapterWordsEl = h('span');
     this.commitEl = h('span', { class: 'commit-state' });
+    this.gitBtn = h('button', { type: 'button', class: 'git-status', hidden: true, onclick: () => this.openRevisions() });
 
     this.el = h('div', { class: 'book' },
       h('aside', { class: 'sidebar' },
@@ -60,7 +63,7 @@ class BookView {
       h('section', { class: 'editor-area' },
         this.panesEl,
         h('div', { class: 'statusbar' },
-          this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.commitEl)));
+          this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.commitEl, this.gitBtn)));
 
     this.setSideVisible(false);
     this.setSplit(Number(readStored('split')) || 0.5);
@@ -72,6 +75,7 @@ class BookView {
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
     this.mode = this.validMode(readStored(`mode:${this.id}`));
+    this.refreshGit({ now: true });
   }
 
   get file() {
@@ -341,6 +345,46 @@ class BookView {
     this.chapterWordsEl.textContent = hit ? `Chapter: ${formatCount(hit.ch.wordsByMode[mode] || 0)} words` : '';
   }
 
+  // --- git ---------------------------------------------------------------------
+
+  // Updates the status-bar button: current draft and uncommitted files. Saves
+  // happen every second while typing, so this waits for a quiet moment.
+  refreshGit({ now = false } = {}) {
+    clearTimeout(this.gitTimer);
+    this.gitTimer = setTimeout(async () => {
+      try {
+        const st = await api.gitStatus(this.id);
+        this.git = st;
+        if (!st.repo) {
+          this.gitBtn.hidden = true;
+          return;
+        }
+        const n = st.files.length;
+        const parts = [st.branch || 'detached', n ? `${n} uncommitted` : 'all committed'];
+        if (st.ahead) parts.push(`${st.ahead} to push`);
+        this.gitBtn.textContent = parts.join(' · ');
+        this.gitBtn.title = 'Save a named revision, or push';
+        this.gitBtn.hidden = false;
+      } catch {
+        // status is a convenience; leave the last value
+      }
+    }, now ? 0 : 1500);
+  }
+
+  async openRevisions() {
+    if (!(await this.save())) return;
+    await openRevisionPanel({
+      bookId: this.id,
+      onCommitted: (res) => {
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        this.commitEl.textContent = `Saved revision ${res.commit} at ${time}`;
+        this.commitEl.classList.remove('error');
+      },
+      onOpenFile: (p) => this.open(tabForPath(p), p),
+    });
+    this.refreshGit({ now: true });
+  }
+
   // Asks the server to commit everything that changed in the book. Never
   // blocks editing; a failure shows in the status bar.
   async checkpoint(reason) {
@@ -352,6 +396,7 @@ class BookView {
         this.commitEl.title = res.files.join('\n');
         this.commitEl.classList.remove('error');
       }
+      this.refreshGit({ now: true });
     } catch (err) {
       this.commitEl.textContent = 'Auto-commit failed';
       this.commitEl.title = err.message;
@@ -377,6 +422,7 @@ class BookView {
     await this.refreshTree();
     await this.syncSide();
     this.updateStatus();
+    this.refreshGit();
     return res;
   }
 

@@ -401,6 +401,32 @@ button.companion-toggle[aria-pressed="true"] { background: var(--accent-soft); b
 }
 .statusbar .spacer { flex: 1; }
 .statusbar .commit-state.error { color: var(--danger); }
+.statusbar button.git-status { padding: 0 8px; font-size: 12px; line-height: 18px; color: var(--muted); background: var(--surface); border-color: var(--divider); }
+.statusbar button.git-status:hover { color: var(--text); }
+
+/* Save revision panel */
+.dialog.dialog-wide { width: min(640px, calc(100vw - 32px)); }
+.dialog textarea { width: 100%; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+.changes { max-height: 40vh; overflow-y: auto; border: 1px solid var(--divider); border-radius: 8px; padding: 4px 0; background: var(--bg); }
+.changes .group-label { padding: 6px 12px 2px; }
+.changes ul { list-style: none; margin: 0; padding: 0; }
+.change { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px; }
+.change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+a.change-path { color: var(--text); text-decoration: none; }
+a.change-path:hover { color: var(--accent); text-decoration: underline; }
+.change-words { display: flex; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.words-added, .s-A { color: #2f7d32; }
+.words-removed, .s-D { color: var(--danger); }
+.s-M, .s-R { color: var(--accent); }
+.status-letter { font: 600 11px var(--mono-font); width: 12px; text-align: center; flex: none; }
+.muted { color: var(--muted); }
+.changes > .muted { margin: 8px 12px; }
+.dialog-buttons .spacer { flex: 1; }
+.push-note { align-self: center; font-size: 12px; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .words-added, :root:not([data-theme="light"]) .s-A { color: #7fc583; }
+}
+:root[data-theme="dark"] .words-added, :root[data-theme="dark"] .s-A { color: #7fc583; }
 
 .toast {
   position: fixed;

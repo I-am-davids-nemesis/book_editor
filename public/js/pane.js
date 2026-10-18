@@ -18,10 +18,11 @@ const VIEWS = { edit: 'Edit', split: 'Split', preview: 'Preview' };
 // preview. The book screen has two: the main pane (the file in the address
 // bar) and the side pane (its plot file or scene).
 export class Pane {
-  constructor({ bookId, role, view = 'edit', headExtras = [], onChange = () => {}, onView = () => {} }) {
+  constructor({ bookId, role, view = 'edit', headExtras = [], onChange = () => {}, onView = () => {}, onSaved = () => {} }) {
     this.bookId = bookId;
     this.role = role;
     this.onChange = onChange;
+    this.onSaved = onSaved;
     this.onView = onView;
     this.file = null; // { path, hash }
     this.saving = null;
@@ -236,6 +237,7 @@ export class Pane {
           this.hideBanner();
         }
         this.saveFailed = false;
+        this.onSaved(this);
         return true;
       } catch (err) {
         if (err.status === 409) {

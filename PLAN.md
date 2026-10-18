@@ -79,6 +79,7 @@ local_editor/
     files.js              # read/write with content hash for conflict detection
     git.js                # execFile wrapper: status, commit, push, log, show, diff, restore
     autocommit.js         # checkpoint commits: on file switch, 30-min timer, shutdown
+    history.js            # status, named commit, push, graph, compare/word diff, restore, drafts
     queue.js              # one job at a time per book (structure changes, commits)
     watch.js              # fs.watch(recursive) per open book → SSE events (debounced, ignores .git)
     compile.js            # join scenes into a chapter or book .md
@@ -94,7 +95,7 @@ local_editor/
       tree.js             # sidebar: Manuscript | Outline | Codex tabs, + buttons, drag reorder
       editor.js           # CodeMirror 6 setup (markdown, line wrap, Cmd+S)
       pane.js             # one open file: editor, Edit/Split/Preview, autosave, conflict banner
-      gitpanel.js         # changed files, message, Commit, Push
+      gitpanel.js         # Save revision panel: changed files, message, Push
       history.js          # per-file log, diff view, restore
       dialogs.js          # prompt/confirm modals
       wordcount.js        # shared with the server, so both count the same way
@@ -120,7 +121,7 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
 | POST | `/:id/reorder` | `{chapter?, order: [names]}` → renumber with `git mv` (manuscript and outline) |
 | DELETE | `/:id/chapters/:ch`, `/:id/scenes` | Delete manuscript and outline entries |
 | POST | `/:id/codex` | `{kind: character\|location\|note, name}` → file from template |
-| GET | `/:id/git/status` | Changed files |
+| GET | `/:id/git/status` | Branch, upstream ahead/behind, remotes, changed files |
 | POST | `/:id/git/commit` | `{message, paths?}` (defaults to all changes) |
 | POST | `/:id/git/push` | Push the current branch, if a remote exists |
 | GET | `/:id/git/log?path=` | `git log --follow` for a file |
@@ -161,7 +162,10 @@ Each milestone ends with something usable, and gets tests before moving on.
 1. ✅ **Skeleton.** Add `package.json`, Express, static files and the import map for CodeMirror. Then config and library listing, register-by-path, the tree endpoint, and file read/write with path guarding. On the frontend: library screen, sidebar tree and CodeMirror editor with Cmd+S. *Check:* open a hand-made book folder and edit a scene.
 2. ✅ **Book creation and structure.** Add the scaffold templates, New book (with git init, initial commit and optional remote), add and rename chapters and scenes with the outline mirror, delete, and reorder with renumbering. Add the codex buttons with templates, and mismatch detection with "Create missing". *Tests:* reorder and renumber edge cases (swap, move to the end, width growth, untracked files), and path traversal attempts.
 3. ✅ **Writing experience.** Add the scene + plot split pane, preview toggle, autosave, dirty-state handling, and word counts (server and live).
-4. **Git.** Add the status, Commit panel ("Save revision", for named milestones) and Push. Then the **History view** (§10): a commit graph of the whole book, with diffs, compare and restore. Branches ("try a stormier opening") come last in this step. *Tests:* commit and log flow in a temp repo; graph lane layout for merges and several branches; the grouping of autosave runs; restore of a file and of the whole book; the no-identity error path.
+4. **Git**, in three parts, each checked before the next:
+   - ✅ **4a. Status, Save revision, Push.** Status bar shows the draft (branch) and the number of uncommitted files; clicking it opens the Save revision panel (changed files, a message, **Save revision**, **Push** when there's a remote). *Tests:* status parsing, named commit, nothing-to-commit and no-identity errors, push to a local bare remote.
+   - **4b. History view** (§10): the commit graph with autosave runs folded, commit and two-point compare with word-level diffs, restore a file or the whole book, view an old version beside the current one. *Tests:* graph lane layout for merges and several branches; grouping of autosave runs; compare and word counts; restore.
+   - **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the sidebar and graph. *Tests:* create/switch with checkpoint commits; invalid names.
 5. **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. **Compile.** Compile a chapter or the whole book, then download.
 7. **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.

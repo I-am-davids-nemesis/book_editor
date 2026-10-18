@@ -54,6 +54,12 @@ export class AutoCommitter {
     this.timers.set(root, timer);
   }
 
+  // A commit was made some other way (Save revision): stop the clock.
+  committed(root) {
+    clearTimeout(this.timers.get(root));
+    this.timers.delete(root);
+  }
+
   async commit(root, reason) {
     clearTimeout(this.timers.get(root));
     this.timers.delete(root);

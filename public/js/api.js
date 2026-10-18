@@ -30,6 +30,10 @@ export const api = {
   writeFile: (id, path, content, baseHash, force = false, opts) =>
     request('PUT', `${book(id)}/file`, { path, content, baseHash, force }, opts),
   checkpoint: (id, reason) => request('POST', `${book(id)}/checkpoint`, { reason }),
+  gitStatus: (id) => request('GET', `${book(id)}/git/status`),
+  gitCommit: (id, message) => request('POST', `${book(id)}/git/commit`, { message }),
+  gitPush: (id) => request('POST', `${book(id)}/git/push`),
+  gitCompare: (id, { from, to }) => request('GET', `${book(id)}/git/compare?${new URLSearchParams({ ...(from ? { from } : {}), to })}`),
 
   createBook: (title, remote) => request('POST', '/api/books', { title, remote }),
 

@@ -8,6 +8,7 @@ import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
+import { commitNamed, compare, push, status } from './history.js';
 import { buildImportMap } from './importmap.js';
 import { serialized } from './queue.js';
 import {
@@ -131,6 +132,26 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
   api.post('/books/:id/checkpoint', async (req, res) => {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : '';
     res.json(await autoCommitter.commit(await bookRoot(req), reason));
+  });
+
+  // --- git ---
+  api.get('/books/:id/git/status', async (req, res) => {
+    res.json(await status(await bookRoot(req)));
+  });
+
+  api.post('/books/:id/git/commit', async (req, res) => {
+    const root = await bookRoot(req);
+    const result = await commitNamed(root, req.body?.message);
+    autoCommitter.committed(root);
+    res.json(result);
+  });
+
+  api.post('/books/:id/git/push', async (req, res) => {
+    res.json(await push(await bookRoot(req)));
+  });
+
+  api.get('/books/:id/git/compare', async (req, res) => {
+    res.json(await compare(await bookRoot(req), { from: req.query.from, to: req.query.to }));
   });
 
   // Runs a structure operation for the book in the route, one at a time.
