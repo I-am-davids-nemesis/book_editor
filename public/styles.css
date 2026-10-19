@@ -365,6 +365,7 @@ a.row-main { cursor: pointer; }
 }
 .save-state { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .save-state.warn { color: var(--danger); }
+.save-state.flash { color: var(--accent); font-weight: 600; }
 button.companion-toggle { padding: 2px 10px; font-size: 12px; }
 button.companion-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 

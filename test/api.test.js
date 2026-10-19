@@ -196,3 +196,30 @@ test('drafts: branch and switch over HTTP', async () => {
   assert.deepEqual((await call('GET', `/api/books/${id}/git/status`)).data.branches.sort(), ['main', 'stormy-opening']);
 });
 
+test('events stream reports file changes', async () => {
+  const id = (await call('POST', '/api/books', { title: 'Watched' })).data.id;
+  const root = path.join(library, id);
+  const { port } = server.address();
+  const got = await new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path: `/api/books/${id}/events`, headers: { Host: `127.0.0.1:${port}` } }, (res) => {
+      assert.equal(res.headers['content-type'], 'text/event-stream');
+      let buf = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        buf += chunk;
+        for (const m of buf.matchAll(/^data: (.*)$/gm)) {
+          const batch = JSON.parse(m[1]);
+          if (batch.files.some((f) => f.path === 'manuscript/hello.md')) {
+            req.destroy();
+            resolve(batch);
+          }
+        }
+      });
+      setTimeout(() => fs.writeFile(path.join(root, 'manuscript/hello.md'), 'Hello.\n').catch(reject), 300);
+    });
+    req.on('error', (err) => { if (err.code !== 'ECONNRESET') reject(err); });
+    setTimeout(() => reject(new Error('no event')), 5000);
+  });
+  assert.equal(got.files.find((f) => f.path === 'manuscript/hello.md').exists, true);
+});
+

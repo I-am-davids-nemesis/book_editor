@@ -18,6 +18,7 @@ import {
   renameChapter, renameScene, reorderChapters, reorderScenes,
 } from './structure.js';
 import { buildTree } from './tree.js';
+import { watchBook } from './watch.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicDir = path.join(projectRoot, 'public');
@@ -134,6 +135,26 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
   api.post('/books/:id/checkpoint', async (req, res) => {
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : '';
     res.json(await autoCommitter.commit(await bookRoot(req), reason));
+  });
+
+  // Live changes to the book's files, as server-sent events. Each event is a
+  // batch: { files: [{path, hash, exists}], tree, git }.
+  api.get('/books/:id/events', async (req, res) => {
+    const root = await bookRoot(req);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+    });
+    res.write('retry: 2000\n\n');
+    const send = (batch) => res.write(`data: ${JSON.stringify(batch)}\n\n`);
+    const unwatch = watchBook(root, send);
+    // A comment now and then keeps proxies and sleeping laptops from dropping it.
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    req.on('close', () => {
+      clearInterval(ping);
+      unwatch();
+    });
   });
 
   // --- git ---

@@ -37,7 +37,7 @@ Set `BOOK_EDITOR_CONFIG=/path/to/config.json` to use a different config file.
 - A scene opens with its plot file beside it, and a plot file with its scene (in the sidebar's narration mode, with buttons to flip modes). **Plot** / **Scene** in the header shows or hides that pane; drag the divider to resize it (double-click resets). Missing partners get a **Create** button.
 - Each pane has **Edit / Split / Preview**. The preview renders Markdown and drops anything that could run code.
 - Word counts update as you type: the status bar (file, plot, chapter) and the sidebar (scene, chapter, book).
-- If the file changed on disk since you opened it (another editor, Obsidian, an agent), saving shows a banner to load the disk version or overwrite it with yours.
+- **Live reload.** The editor watches the book folder, so changes made elsewhere (Obsidian, a terminal, an agent) show up as they happen. An open file without unsaved edits reloads in place ("Reloaded: changed on disk"). If you had unsaved edits, autosave pauses and a banner offers **Discard mine, load disk version** or **Overwrite with mine**. A file deleted on disk gets **Save mine again** / **Close**. New or removed files refresh the sidebar, a plot file created elsewhere appears beside its scene, and commits or branch switches from a terminal update the status bar and History. Reloading clears that file's undo history.
 - Word counts in the sidebar cover the manuscript only, not outline or codex files.
 
 ## Test

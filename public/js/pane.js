@@ -18,11 +18,15 @@ const VIEWS = { edit: 'Edit', split: 'Split', preview: 'Preview' };
 // preview. The book screen has two: the main pane (the file in the address
 // bar) and the side pane (its plot file or scene).
 export class Pane {
-  constructor({ bookId, role, view = 'edit', headExtras = [], onChange = () => {}, onView = () => {}, onSaved = () => {} }) {
+  constructor({
+    bookId, role, view = 'edit', headExtras = [],
+    onChange = () => {}, onView = () => {}, onSaved = () => {}, onCloseRequest = () => {},
+  }) {
     this.bookId = bookId;
     this.role = role;
     this.onChange = onChange;
     this.onSaved = onSaved;
+    this.onCloseRequest = onCloseRequest;
     this.onView = onView;
     this.file = null; // { path, hash }
     this.saving = null;
@@ -279,18 +283,72 @@ export class Pane {
     return this.saving;
   }
 
-  showConflict(data) {
+  showConflict(data, { live = false } = {}) {
     const gone = data.diskContent === null;
-    this.showBanner(
-      gone
-        ? 'This file was deleted or moved on disk since you opened it.'
-        : 'This file changed on disk since you opened it. Your edits are still here.',
-      [
-        !gone && h('button', { type: 'button', onclick: () => this.reloadFromDisk(data) }, 'Discard mine, load disk version'),
-        h('button', { type: 'button', class: 'primary', onclick: () => this.save({ force: true }) },
-          gone ? 'Save mine again' : 'Overwrite with mine'),
-      ],
-    );
+    const message = gone
+      ? 'This file was deleted or moved on disk.'
+      : live
+        ? 'This file just changed on disk (another app or an agent) while you had unsaved edits. Your edits are still here.'
+        : 'This file changed on disk since you opened it. Your edits are still here.';
+    this.showBanner(message, [
+      !gone && h('button', { type: 'button', onclick: () => this.reloadFromDisk(data) }, 'Discard mine, load disk version'),
+      h('button', { type: 'button', class: 'primary', onclick: () => this.save({ force: true }) },
+        gone ? 'Save mine again' : 'Overwrite with mine'),
+      gone && !this.dirty && h('button', { type: 'button', onclick: () => this.onCloseRequest(this) }, 'Close'),
+    ]);
+  }
+
+  // --- changes made elsewhere ---------------------------------------------------
+
+  // Called with a file change the server saw on disk. A clean pane reloads in
+  // place; one with unsaved edits stops autosaving and asks what to do.
+  // `change.hash` undefined means "unknown, check" (after a reconnect).
+  async externalChange(change) {
+    if (!this.file || change.path !== this.file.path) return null;
+    // Our own save may still be in flight; its new hash arrives with it.
+    if (this.saving) await this.saving;
+    if (!this.file || change.path !== this.file.path) return null;
+    if (change.hash && change.hash === this.file.hash) return null;
+
+    let disk = null;
+    if (change.exists !== false) {
+      try {
+        disk = await api.readFile(this.bookId, this.file.path);
+      } catch (err) {
+        if (err.status !== 404) throw err;
+      }
+    }
+    if (disk && disk.hash === this.file.hash) return null;
+    if (!disk) {
+      this.cancelAutosave();
+      this.conflicted = true;
+      this.showConflict({ diskContent: null, diskHash: null }, { live: true });
+      this.updateStatus();
+      return 'removed';
+    }
+    if (!this.dirty && !this.conflicted) {
+      this.file.hash = disk.hash;
+      this.editor.load(disk.content, { keepSelection: true });
+      this.renderPreview();
+      this.flashState('Reloaded: changed on disk');
+      this.onChange(this);
+      return 'reloaded';
+    }
+    this.cancelAutosave();
+    this.conflicted = true;
+    this.showConflict({ diskContent: disk.content, diskHash: disk.hash }, { live: true });
+    this.updateStatus();
+    return 'conflict';
+  }
+
+  flashState(text) {
+    clearTimeout(this.flashTimer);
+    this.stateEl.textContent = text;
+    this.stateEl.classList.add('flash');
+    this.flashTimer = setTimeout(() => {
+      this.stateEl.classList.remove('flash');
+      this.updateStatus();
+    }, 4000);
   }
 
   reloadFromDisk({ diskContent, diskHash }) {

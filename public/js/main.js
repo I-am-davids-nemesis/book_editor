@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
+import { connectEvents } from './events.js';
 import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
@@ -43,6 +44,7 @@ class BookView {
       onChange: (pane) => this.paneChanged(pane),
       onView: (v) => writeStored(`view:${role}`, v),
       onSaved: () => this.refreshGit(),
+      onCloseRequest: (pane) => this.closePane(pane),
     });
     this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn] });
     this.sideModeEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode of the scene', hidden: true });
@@ -107,6 +109,68 @@ class BookView {
     topbarActions.replaceChildren(this.draftBtn, this.historyBtn);
     this.mode = this.validMode(readStored(`mode:${this.id}`));
     this.refreshGit({ now: true });
+    this.events = connectEvents(this.id, {
+      onBatch: (batch) => this.onDiskChanges(batch),
+      onReconnect: () => this.onDiskChanges({ files: [], tree: true, git: true, resync: true }),
+    });
+  }
+
+  // Leaving the book.
+  dispose() {
+    this.events?.close();
+    clearTimeout(this.gitTimer);
+    clearTimeout(this.historyTimer);
+  }
+
+  // --- live reload -------------------------------------------------------------
+
+  // Changes the server saw on disk: from another editor, an agent, git in a
+  // terminal, or the editor's own saves (recognized by their hash). Batches
+  // are handled one at a time, after any change the editor itself is making.
+  onDiskChanges(batch) {
+    this.diskQueue = (this.diskQueue || Promise.resolve())
+      .then(() => this.applyDiskChanges(batch))
+      .catch((err) => console.error('Live reload failed', err));
+  }
+
+  async applyDiskChanges(batch) {
+    await Promise.all([this.busy, this.opInFlight].filter(Boolean).map((p) => p.catch(() => {})));
+    const panes = [this.main, this.side];
+    const ownHash = new Map(panes.filter((p) => p.file).map((p) => [p.file.path, p.file.hash]));
+    // Files changed by someone else (our own saves come back with our hash).
+    const foreign = batch.files.filter((f) => !(f.hash && ownHash.get(f.path) === f.hash));
+    for (const pane of panes) {
+      const path = pane.file?.path;
+      if (!path) continue;
+      const change = batch.resync ? { path } : foreign.find((f) => f.path === path);
+      if (change) await pane.externalChange(change);
+    }
+    const manuscriptChanged = foreign.some((f) => f.path.startsWith('manuscript/'));
+    if (batch.tree || manuscriptChanged) {
+      await this.refreshTree();
+      // A missing plot or scene file may have appeared.
+      if (!this.side.file && !this.side.readOnly) await this.syncSide();
+      this.updateStatus();
+    }
+    if (foreign.length || batch.tree || batch.git) {
+      this.refreshGit();
+      if (this.el.classList.contains('show-history')) {
+        clearTimeout(this.historyTimer);
+        this.historyTimer = setTimeout(() => this.history.show().catch(() => {}), 400);
+      }
+    }
+  }
+
+  // The banner's Close, for a file deleted on disk.
+  closePane(pane) {
+    if (pane === this.main) {
+      this.main.close(NOTHING_OPEN);
+      history.replaceState(null, '', bookHref(this.id, this.tab));
+      this.renderTree();
+    } else {
+      this.side.close();
+    }
+    this.syncSide().then(() => this.updateStatus());
   }
 
   get file() {
@@ -618,6 +682,17 @@ class BookView {
   // Saves the open files, runs a structure change, then follows the open
   // files if they moved (or closes them if deleted) and refreshes the tree.
   async runOp(fn) {
+    let done;
+    this.opInFlight = new Promise((r) => { done = r; });
+    try {
+      return await this.runOpInner(fn);
+    } finally {
+      done();
+      this.opInFlight = null;
+    }
+  }
+
+  async runOpInner(fn) {
     if (this.dirty && !(await this.save())) return null;
     let res;
     try {
@@ -789,6 +864,7 @@ async function handleRoute() {
     if (route.view === 'library') {
       if (bookView?.dirty && !(await bookView.save())) return revert();
       bookView?.checkpoint('left the book');
+      bookView?.dispose();
       bookView = null;
       crumb.textContent = '';
       topbarActions.replaceChildren();
@@ -798,6 +874,7 @@ async function handleRoute() {
       if (bookView?.id !== route.id) {
         if (bookView?.dirty && !(await bookView.save())) return revert();
         bookView?.checkpoint('left the book');
+        bookView?.dispose();
         bookView = new BookView(route.id);
         await bookView.init();
         view.replaceChildren(bookView.el);

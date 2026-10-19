@@ -9,3 +9,8 @@ export function serialized(key, fn) {
   tail.then(() => { if (queues.get(key) === tail) queues.delete(key); });
   return run;
 }
+
+// Resolves once the jobs queued so far for `key` have finished.
+export async function whenIdle(key) {
+  while (queues.has(key)) await queues.get(key);
+}
