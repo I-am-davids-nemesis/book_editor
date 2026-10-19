@@ -163,10 +163,10 @@ Each milestone ends with something usable, and gets tests before moving on.
 1. ✅ **Skeleton.** Add `package.json`, Express, static files and the import map for CodeMirror. Then config and library listing, register-by-path, the tree endpoint, and file read/write with path guarding. On the frontend: library screen, sidebar tree and CodeMirror editor with Cmd+S. *Check:* open a hand-made book folder and edit a scene.
 2. ✅ **Book creation and structure.** Add the scaffold templates, New book (with git init, initial commit and optional remote), add and rename chapters and scenes with the outline mirror, delete, and reorder with renumbering. Add the codex buttons with templates, and mismatch detection with "Create missing". *Tests:* reorder and renumber edge cases (swap, move to the end, width growth, untracked files), and path traversal attempts.
 3. ✅ **Writing experience.** Add the scene + plot split pane, preview toggle, autosave, dirty-state handling, and word counts (server and live).
-4. **Git**, in three parts, each checked before the next:
+4. ✅ **Git**, in three parts, each checked before the next:
    - ✅ **4a. Status, Save revision, Push.** Status bar shows the draft (branch) and the number of uncommitted files; clicking it opens the Save revision panel (changed files, a message, **Save revision**, **Push** when there's a remote). *Tests:* status parsing, named commit, nothing-to-commit and no-identity errors, push to a local bare remote.
    - ✅ **4b. History view** (§10): the commit graph with autosave runs folded, commit and two-point compare with word-level diffs, restore a file or the whole book, view an old version beside the current one. *Tests:* graph lane layout for merges and several branches; grouping of autosave runs; compare and word counts; restore.
-   - **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the sidebar and graph. *Tests:* create/switch with checkpoint commits; invalid names.
+   - ✅ **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the top bar's Draft menu and the graph. *Tests:* create/switch with checkpoint commits; invalid names.
 5. **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. **Compile.** Compile a chapter or the whole book, then download.
 7. **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.

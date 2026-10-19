@@ -99,9 +99,11 @@ export function renderDiff(hunks) {
 //   onRestored()                   files on disk changed; reload panes and tree
 //   onViewVersion({path, rev, content, label})   show an old version beside the current file
 //   onSaveRevision()               open the Save revision panel
+//   onNewDraft(hash, label)        start a draft (branch) from a commit
+//   onSwitchDraft(branch)          switch to another draft
 export class HistoryView {
-  constructor({ bookId, onBack, onSelect, onRestored, onViewVersion, onSaveRevision }) {
-    Object.assign(this, { bookId, onBack, onSelect, onRestored, onViewVersion, onSaveRevision });
+  constructor({ bookId, onBack, onSelect, onRestored, onViewVersion, onSaveRevision, onNewDraft, onSwitchDraft }) {
+    Object.assign(this, { bookId, onBack, onSelect, onRestored, onViewVersion, onSaveRevision, onNewDraft, onSwitchDraft });
     this.commits = [];
     this.more = false;
     this.status = null;
@@ -405,7 +407,13 @@ export class HistoryView {
       h('div', { class: 'detail-actions' },
         n.kind === 'group' ? h('button', { type: 'button', onclick: () => { this.expanded.add(n.hash); this.renderList(); } }, 'Show each autosave') : null,
         h('button', { type: 'button', onclick: () => this.restoreBook(n) }, 'Restore whole book to here…'),
-        h('button', { type: 'button', onclick: () => this.toggleCompare(true) }, 'Compare with…')));
+        h('button', { type: 'button', onclick: () => this.onNewDraft(n.hash, nodeTitle(n)), title: 'A separate line of work starting here' }, 'Start a draft from here…'),
+        h('button', { type: 'button', onclick: () => this.toggleCompare(true) }, 'Compare with…'),
+        n.refs.filter((r) => r !== this.branch).map((r) => h('button', {
+          type: 'button',
+          onclick: () => this.onSwitchDraft(r),
+          title: `Make ${r} the draft you're working on`,
+        }, `Switch to draft ${r}`))));
   }
 
   showFileList() {

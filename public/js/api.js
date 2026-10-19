@@ -38,6 +38,8 @@ export const api = {
   gitFileDiff: (id, { from, to, path, fromPath }) =>
     request('GET', `${book(id)}/git/file-diff?${new URLSearchParams(Object.entries({ from, to, path, from_path: fromPath }).filter(([, v]) => v))}`),
   gitRestoreFile: (id, rev, path) => request('POST', `${book(id)}/git/restore-file`, { rev, path }),
+  gitBranch: (id, name, from) => request('POST', `${book(id)}/git/branch`, { name, from }),
+  gitSwitch: (id, branch) => request('POST', `${book(id)}/git/switch`, { branch }),
   gitRestoreBook: (id, rev) => request('POST', `${book(id)}/git/restore-book`, { rev }),
   gitCompare: (id, { from, to }) => request('GET', `${book(id)}/git/compare?${new URLSearchParams({ ...(from ? { from } : {}), to })}`),
 

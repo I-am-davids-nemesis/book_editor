@@ -180,3 +180,19 @@ test('git status, named commit and compare over HTTP', async () => {
   assert.equal((await call('GET', `/api/books/${id}/git/compare?to=${encodeURIComponent('--all')}`)).status, 400);
 });
 
+test('drafts: branch and switch over HTTP', async () => {
+  const id = (await call('POST', '/api/books', { title: 'Drafted' })).data.id;
+  const root = path.join(library, id);
+  const first = gitIn(root, 'rev-parse', 'HEAD').trim();
+  await call('POST', `/api/books/${id}/chapters`, { title: 'First' });
+  const b = await call('POST', `/api/books/${id}/git/branch`, { name: 'Stormy opening', from: first });
+  assert.equal(b.status, 200);
+  assert.equal(b.data.branch, 'stormy-opening');
+  assert.equal(b.data.checkpoint.committed, true);
+  assert.equal((await call('GET', `/api/books/${id}/git/status`)).data.branch, 'stormy-opening');
+  assert.equal((await call('POST', `/api/books/${id}/git/branch`, { name: 'stormy opening' })).status, 409);
+  assert.equal((await call('POST', `/api/books/${id}/git/switch`, { branch: 'nope' })).status, 404);
+  assert.equal((await call('POST', `/api/books/${id}/git/switch`, { branch: 'main' })).status, 200);
+  assert.deepEqual((await call('GET', `/api/books/${id}/git/status`)).data.branches.sort(), ['main', 'stormy-opening']);
+});
+

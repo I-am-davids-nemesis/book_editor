@@ -9,7 +9,7 @@ import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
 import {
-  commitNamed, compare, fileDiff, graph, push, restoreBook, restoreFile, status,
+  commitNamed, compare, createBranch, fileDiff, graph, push, restoreBook, restoreFile, status, switchBranch,
 } from './history.js';
 import { buildImportMap } from './importmap.js';
 import { serialized } from './queue.js';
@@ -170,6 +170,21 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
     const root = await bookRoot(req);
     const result = await restoreFile(root, { rev: req.body?.rev, path: req.body?.path });
     autoCommitter.changed(root);
+    res.json(result);
+  });
+
+  // Drafts are branches. Both routes commit pending work before moving.
+  api.post('/books/:id/git/branch', async (req, res) => {
+    const root = await bookRoot(req);
+    const result = await createBranch(root, { name: req.body?.name, from: req.body?.from || undefined });
+    autoCommitter.committed(root);
+    res.json(result);
+  });
+
+  api.post('/books/:id/git/switch', async (req, res) => {
+    const root = await bookRoot(req);
+    const result = await switchBranch(root, { branch: req.body?.branch });
+    autoCommitter.committed(root);
     res.json(result);
   });
 

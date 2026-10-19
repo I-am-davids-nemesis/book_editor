@@ -7,7 +7,7 @@ import { Pane } from './pane.js';
 import {
   availableModes, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
 } from './tree.js';
-import { bookHref, formatCount, h, parseHash, toast } from './ui.js';
+import { bookHref, formatCount, h, parseHash, showMenu, toast } from './ui.js';
 
 const view = document.getElementById('view');
 const crumb = document.getElementById('crumb');
@@ -69,10 +69,15 @@ class BookView {
 
     this.history = new HistoryView({
       bookId: id,
-      onBack: () => this.open(this.tab, this.file?.path),
+      onBack: async () => {
+        if (this.busy) await this.busy.catch(() => {});
+        this.open(this.tab, this.file?.path);
+      },
       onSelect: (hash) => history.replaceState(null, '', bookHref(this.id, 'history', hash)),
-      onRestored: () => this.reloadFromDisk(),
+      onRestored: () => this.rewriting(() => {}),
       onViewVersion: (v) => this.viewVersion(v),
+      onNewDraft: (from, label) => this.newDraft(from, label),
+      onSwitchDraft: (branch) => this.switchDraft(branch),
       onSaveRevision: async () => {
         await this.openRevisions();
         await this.history.show();
@@ -80,6 +85,14 @@ class BookView {
     });
     this.el.append(this.history.el);
     this.historyBtn = h('button', { type: 'button', class: 'history-btn', onclick: () => this.openHistory() }, 'History');
+    this.draftBtn = h('button', {
+      type: 'button',
+      class: 'draft-btn',
+      hidden: true,
+      'aria-haspopup': 'menu',
+      title: 'Drafts: separate lines of work (git branches)',
+      onclick: (e) => this.showDraftMenu(e.currentTarget),
+    });
     this.revisionView = null; // { path, rev, content, label }: an old version shown beside the file
 
     this.setSideVisible(false);
@@ -91,7 +104,7 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
-    topbarActions.replaceChildren(this.historyBtn);
+    topbarActions.replaceChildren(this.draftBtn, this.historyBtn);
     this.mode = this.validMode(readStored(`mode:${this.id}`));
     this.refreshGit({ now: true });
   }
@@ -176,6 +189,8 @@ class BookView {
   // --- routing ---------------------------------------------------------------
 
   async route({ tab, path }) {
+    // A draft switch or restore is rewriting files; let it finish first.
+    if (this.busy) await this.busy.catch(() => {});
     if (tab === 'history') {
       // `path` here is a commit hash, if any.
       this.el.classList.add('show-history');
@@ -194,6 +209,7 @@ class BookView {
     const previous = this.file?.path ?? null;
     const changed = path !== previous;
     if (changed && this.revisionView?.path !== path) this.revisionView = null;
+    if (changed) this.missingPath = null;
     if (changed) {
       if (path) {
         await this.main.open(path);
@@ -257,12 +273,18 @@ class BookView {
   async reloadFromDisk() {
     this.revisionView = null;
     await this.refreshTree();
-    const path = this.main.file?.path;
+    // A file missing in one draft may be back in the next: remember it.
+    const path = this.main.file?.path ?? this.missingPath;
     if (path) {
       try {
         await this.main.open(path);
+        this.missingPath = null;
+        if (location.hash !== bookHref(this.id, this.tab, path) && !this.el.classList.contains('show-history')) {
+          history.replaceState(null, '', bookHref(this.id, this.tab, path));
+        }
       } catch {
-        this.main.close(`${path} no longer exists.`);
+        this.missingPath = path;
+        this.main.close(`${path} doesn't exist in this version of the book.`);
       }
     }
     this.side.close();
@@ -311,10 +333,11 @@ class BookView {
     });
     if (!ok || !(await this.save())) return;
     try {
-      await api.checkpoint(this.id, `before restoring ${v.path}`);
-      await api.gitRestoreFile(this.id, v.rev, v.path);
+      await this.rewriting(async () => {
+        await api.checkpoint(this.id, `before restoring ${v.path}`);
+        await api.gitRestoreFile(this.id, v.rev, v.path);
+      });
       toast(`Restored ${v.path}`);
-      await this.reloadFromDisk();
     } catch (err) {
       toast(err.message, { error: true });
     }
@@ -474,8 +497,11 @@ class BookView {
         this.git = st;
         if (!st.repo) {
           this.gitBtn.hidden = true;
+          this.draftBtn.hidden = true;
           return;
         }
+        this.draftBtn.hidden = false;
+        this.draftBtn.replaceChildren('Draft: ', h('strong', {}, st.branch || 'detached'), ' ▾');
         const n = st.files.length;
         const parts = [st.branch || 'detached', n ? `${n} uncommitted` : 'all committed'];
         if (st.ahead) parts.push(`${st.ahead} to push`);
@@ -486,6 +512,72 @@ class BookView {
         // status is a convenience; leave the last value
       }
     }, now ? 0 : 1500);
+  }
+
+  // --- drafts (branches) ---------------------------------------------------------
+
+  showDraftMenu(anchor) {
+    const st = this.git;
+    if (!st?.repo) return;
+    showMenu(anchor, [
+      ...st.branches.map((b) => ({
+        label: b === st.branch ? `✓ ${b}` : `   ${b}`,
+        disabled: b === st.branch,
+        onclick: () => this.switchDraft(b),
+      })),
+      null,
+      { label: 'New draft from here…', onclick: () => this.newDraft() },
+      { label: 'Start a draft from an earlier point…', onclick: () => this.openHistory() },
+    ]);
+  }
+
+  async newDraft(from = null, fromLabel = '') {
+    const name = await promptDialog({
+      title: 'Start a new draft',
+      label: 'Name',
+      okLabel: 'Start draft',
+      hint: `${from ? `Starts from “${fromLabel}”.` : 'Starts from where you are now.'} Your current work is committed first; switch back any time from the Draft menu.`,
+    });
+    if (!name || !(await this.save())) return;
+    try {
+      let res;
+      await this.rewriting(async () => { res = await api.gitBranch(this.id, name, from || undefined); });
+      toast(`Now on draft ${res.branch}`);
+      await this.afterDraftChange();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  }
+
+  async switchDraft(branch) {
+    if (!(await this.save())) return;
+    try {
+      await this.rewriting(() => api.gitSwitch(this.id, branch));
+      toast(`Now on draft ${branch}`);
+      await this.afterDraftChange();
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  }
+
+  // The files on disk are now another draft's.
+  async afterDraftChange() {
+    if (this.el.classList.contains('show-history')) await this.history.show();
+  }
+
+  // Runs a change that rewrites files on disk (switching drafts, restoring),
+  // then rereads the open files. Navigation waits for it.
+  async rewriting(fn) {
+    const run = (async () => {
+      await fn();
+      await this.reloadFromDisk();
+    })();
+    this.busy = run;
+    try {
+      await run;
+    } finally {
+      if (this.busy === run) this.busy = null;
+    }
   }
 
   async openRevisions() {

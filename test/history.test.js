@@ -17,6 +17,7 @@ test('status lists changes, branch and remotes', async () => {
   const s = await status(root);
   assert.equal(s.repo, true);
   assert.equal(s.branch, 'main');
+  assert.deepEqual(s.branches, ['main']);
   assert.deepEqual(s.remotes, []);
   assert.deepEqual(s.files.map((f) => `${f.status} ${f.path}`).sort(),
     ['A outline/01-a/01-one.md', 'D codex/x.md', 'M manuscript/01-a/01-one.md']);

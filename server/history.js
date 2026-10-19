@@ -80,9 +80,12 @@ export async function status(root) {
     files.push(file);
   }
   const remotes = (await g(root, ['remote'])).trim().split('\n').filter(Boolean);
+  const branches = (await g(root, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']))
+    .trim().split('\n').filter(Boolean);
   return {
     repo: true,
     branch: await currentBranch(root),
+    branches,
     head: await headCommit(root),
     files,
     remotes,
