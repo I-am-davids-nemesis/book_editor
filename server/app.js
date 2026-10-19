@@ -5,6 +5,7 @@ import express from 'express';
 import { AutoCommitter } from './autocommit.js';
 import { createBook, forgetBook, getBook, getBookRoot, listBooks, registerBook } from './books.js';
 import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
+import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
 import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
@@ -155,6 +156,20 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
       clearInterval(ping);
       unwatch();
     });
+  });
+
+  // --- compile ---
+  api.get('/books/:id/compile', async (req, res) => {
+    const settings = await readSettings(await bookRoot(req));
+    res.json({ separator: settings.compile?.sceneSeparator || DEFAULT_SEPARATOR, defaultSeparator: DEFAULT_SEPARATOR });
+  });
+
+  api.post('/books/:id/compile', async (req, res) => {
+    const root = await bookRoot(req);
+    const { scope, chapter, mode, separator, remember } = req.body || {};
+    const result = await compile(root, { scope, chapter, mode: mode ?? '', separator, remember: remember === true });
+    if (remember) autoCommitter.changed(root); // book.json changed
+    res.json(result);
   });
 
   // --- git ---

@@ -30,6 +30,8 @@ export const api = {
   writeFile: (id, path, content, baseHash, force = false, opts) =>
     request('PUT', `${book(id)}/file`, { path, content, baseHash, force }, opts),
   checkpoint: (id, reason) => request('POST', `${book(id)}/checkpoint`, { reason }),
+  getCompileSettings: (id) => request('GET', `${book(id)}/compile`),
+  compile: (id, opts) => request('POST', `${book(id)}/compile`, opts),
   gitStatus: (id) => request('GET', `${book(id)}/git/status`),
   gitCommit: (id, message) => request('POST', `${book(id)}/git/commit`, { message }),
   gitPush: (id) => request('POST', `${book(id)}/git/push`),

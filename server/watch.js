@@ -15,6 +15,7 @@ const IGNORED = [
   /(^|\/)\.moving-/,
   /(^|\/)\.DS_Store$/,
   /(^|\/)\.obsidian(\/|$)/,
+  /^compiled(\/|$)/,
   /~$/,
   /(^|\/)\.#/,
   /\.sw[px]$/,

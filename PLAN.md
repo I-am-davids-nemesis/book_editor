@@ -18,6 +18,7 @@ A local, browser-based editor for novels stored as plain Markdown in git. A smal
 | Library | Default root `~/workspace/books/`, plus books registered from any path |
 | v1 extras | Scene and plot side by side; word counts; compile; live reload on external edits; git history and diff |
 | Coexistence | Plain files only, no hidden database; new books get `AGENTS.md` and `CLAUDE.md` |
+| Code | Books hold no code (prose, outlines, codex, notes, `book.json` settings). Every tool, including command-line ones for agents (`bin/`), lives in this project |
 | Scene files | Pure prose, no front matter; metadata lives in the outline file |
 | Delete | Removes the scene and its outline file after confirmation |
 | Links | No `[[link]]` autocomplete in v1; wikilinks are left as plain text |
@@ -82,7 +83,8 @@ local_editor/
     history.js            # status, named commit, push, graph, compare/word diff, restore, drafts
     queue.js              # one job at a time per book (structure changes, commits)
     watch.js              # fs.watch(recursive) per open book → SSE events (debounced, ignores .git)
-    compile.js            # join scenes into a chapter or book .md
+    compile.js            # join scenes into a chapter or book .md, per mode; book.json settings
+  bin/compile.mjs         # command-line compile for agents (same rules as the dialog)
   templates/book/         # scaffold copied into every new book
   public/
     index.html            # import map pointing at /vendor/... (served from node_modules)
@@ -133,7 +135,8 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
 | GET | `/:id/git/compare?from=&to=&path=` | Changed files between two commits, or one file's diff |
 | POST | `/:id/git/branch` | `{name, from}` → create a branch (a "draft") and switch to it, after a checkpoint commit |
 | POST | `/:id/git/switch` | `{branch}` → checkpoint, then switch; open panes reload |
-| POST | `/:id/compile` | `{scope: book\|chapter, chapter?}` → writes `compiled/…md`, returns content |
+| GET | `/:id/compile` | The book's scene separator (from `book.json`) and the default |
+| POST | `/:id/compile` | `{scope: book\|chapter, chapter?, mode, separator?, remember?}` → writes `compiled/<book\|chapter>[.<mode>].md`, returns content, counts and warnings |
 | GET | `/:id/events` | SSE stream of batches: `{files: [{path, hash, exists}], tree, git}` (debounced; waits for structure changes to finish) |
 
 ### Notes on the tricky parts
@@ -143,7 +146,7 @@ All book routes are under `/api/books/:id`, where `:id` is the key from the conf
 - **Live reload.** When the watcher reports a change to the open file and the editor is clean, the editor reloads silently, keeping the cursor position. When the editor is dirty, a banner offers the same choice as a conflict. Tree changes refresh the sidebar.
 - **Git.** Calls use `execFile('git', args, {cwd: bookRoot})`, never a shell string. Commit errors (no `user.name`, nothing to commit, push rejected) are shown verbatim in the panel.
 - **Word counts.** The server computes them for the tree. The client recounts the open file live and updates the scene, chapter and book totals in the sidebar.
-- **Compile.** Chapter headings come from the folder titles (`# The Washing House`). Scenes are joined with `* * *`. Output goes to `compiled/book.md` or `compiled/<chapter>.md`, and can also be downloaded.
+- **Compile.** Chapter headings come from the folder titles (`# The Washing House`). Scenes are joined with the book's separator (`book.json` → `compile.sceneSeparator`, default `* * *`). Each mode uses the scene's variant, falling back to the plain file. Output goes to `compiled/book[.<mode>].md` or `compiled/<chapter>[.<mode>].md`, and can also be downloaded. The rules match the_builder's `scripts/compile.mjs`, so both produce identical files.
 
 ## 5. UI
 
@@ -168,7 +171,7 @@ Each milestone ends with something usable, and gets tests before moving on.
    - ✅ **4b. History view** (§10): the commit graph with autosave runs folded, commit and two-point compare with word-level diffs, restore a file or the whole book, view an old version beside the current one. *Tests:* graph lane layout for merges and several branches; grouping of autosave runs; compare and word counts; restore.
    - ✅ **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the top bar's Draft menu and the graph. *Tests:* create/switch with checkpoint commits; invalid names.
 5. ✅ **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
-6. **Compile.** Compile a chapter or the whole book, then download.
+6. ✅ **Compile.** Compile a chapter or the whole book, per narration mode, then download.
 7. **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.
 8. **Claude Code.** Run Claude Code from the browser in the book's folder and stream its work back into a Claude panel (design in §9). This comes after live reload (step 5), so edits it makes show up in the open panes, and after git (step 4), so each run's changes can be reviewed as a diff. *Tests:* a fake agent stream (no real model calls) for streaming, approval round-trips, stop, and the before/after commits; a path check refusing writes outside the book. *Check:* ask it to draft a scene from its plot file while the plot is open, and watch the scene fill in.
 

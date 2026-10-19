@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
+import { openCompileDialog } from './compile.js';
 import { connectEvents } from './events.js';
 import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
@@ -809,6 +810,18 @@ class BookView {
       setMode: (mode) => this.setMode(mode),
 
       history: (path) => this.openHistory(path),
+
+      compile: async (chapter = null) => {
+        if (!(await this.save())) return;
+        await openCompileDialog({
+          bookId: id,
+          bookTitle: this.book.title,
+          chapters: this.tree.chapters.filter((c) => c.inManuscript),
+          modes: availableModes(this.tree).map((m) => ({ value: m, label: modeLabel(m) })),
+          mode: this.mode,
+          chapter,
+        });
+      },
 
       reorder: (chapter, order) => this.runOp(() => api.reorder(id, chapter || undefined, order)),
 

@@ -83,7 +83,7 @@ export function setFileWords(tree, path, words) {
 //   addChapter(), addScene(ch), renameChapter(ch), deleteChapter(ch),
 //   renameScene(ch, scene), deleteScene(ch, scene), reorder(chapterName|null, names),
 //   createMissing(path), addCodex(kind), renameCodex(entry), deleteCodex(entry),
-//   history(path)
+//   history(path), compile(chapterName?)
 
 function moreButton(label, items) {
   return h('button', {
@@ -204,6 +204,7 @@ function chapterGroup(ctx, ch, children) {
       { label: sceneLabel, onclick: () => actions.addScene(ch) },
       null,
       { label: 'Rename chapter…', onclick: () => actions.renameChapter(ch) },
+      { label: 'Compile chapter…', disabled: !ch.inManuscript, onclick: () => actions.compile(ch.name) },
       ...moveItems(chapterNames, ch.name, (order) => actions.reorder(null, order)),
       null,
       { label: 'Delete chapter…', danger: true, onclick: () => actions.deleteChapter(ch) },
@@ -280,7 +281,11 @@ function modePicker(ctx) {
 
 function manuscriptTab(ctx) {
   const { tree, actions } = ctx;
-  const out = [toolbar(addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()), modePicker(ctx))];
+  const out = [toolbar(
+    addButton('+ Chapter', 'Add a chapter at the end', () => actions.addChapter()),
+    tree.chapters.length ? addButton('Compile…', 'Join the scenes into one file for the book or a chapter', () => actions.compile()) : null,
+    modePicker(ctx),
+  )];
   out.push(...tree.chapters.map((ch) => chapterGroup(ctx, ch, ch.scenes.map((s) => sceneRow(ctx, ch, s)))));
   out.push(...looseFiles(ctx, tree.looseManuscript));
   if (!tree.chapters.length) out.push(h('div', { class: 'empty-tree' }, 'No chapters yet. Use “+ Chapter” to start.'));
