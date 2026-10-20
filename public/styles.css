@@ -171,8 +171,9 @@ input[type="text"], select {
   flex: none;
 }
 .brand { font-weight: 600; text-decoration: none; }
-.crumb { color: var(--muted); }
-.topbar-actions { margin-left: auto; display: flex; gap: 8px; }
+.crumb { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-actions { display: flex; gap: 8px; }
+.help-btn { width: 28px; padding: 4px 0; border-radius: 50%; font-weight: 600; color: var(--muted); }
 .topbar-actions button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 #view { flex: 1; min-height: 0; display: flex; }
@@ -196,6 +197,7 @@ input[type="text"], select {
 }
 .book-card:hover { border-color: var(--accent); }
 .book-card h2 { font: 600 17px var(--prose-font); margin: 0 0 6px; }
+.book-card .stats { font-size: 13px; margin-bottom: 4px; }
 .book-card .path { color: var(--muted); font-size: 12px; word-break: break-all; }
 .book-card .tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
@@ -437,7 +439,20 @@ button.companion-toggle[aria-pressed="true"] { background: var(--accent-soft); b
   font-variant-numeric: tabular-nums;
 }
 .statusbar .spacer { flex: 1; }
-.statusbar .commit-state.error { color: var(--danger); }
+.statusbar .commit-state.error, .statusbar .conn-state { color: var(--danger); }
+
+/* quick open and shortcuts */
+.quick-open { width: min(560px, calc(100vw - 32px)); margin-top: 12vh; }
+.quick-inner { display: flex; flex-direction: column; }
+.quick-open input { font: inherit; font-size: 16px; padding: 12px 14px; border: none; border-bottom: 1px solid var(--divider); background: var(--surface); color: var(--text); outline: none; border-radius: 12px 12px 0 0; }
+.quick-list { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow-y: auto; }
+.quick-list li { display: flex; gap: 10px; align-items: baseline; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.quick-list li.active { background: var(--accent-soft); }
+.quick-label { font-weight: 600; }
+.quick-detail { color: var(--muted); font-size: 12px; }
+table.shortcuts { border-collapse: collapse; }
+table.shortcuts td { padding: 4px 12px 4px 0; vertical-align: top; }
+kbd { font: 12px var(--mono-font); padding: 1px 6px; border: 1px solid var(--divider); border-bottom-width: 2px; border-radius: 4px; background: var(--bg); white-space: pre; }
 .statusbar button.git-status { padding: 0 8px; font-size: 12px; line-height: 18px; color: var(--muted); background: var(--surface); border-color: var(--divider); }
 .statusbar button.git-status:hover { color: var(--text); }
 

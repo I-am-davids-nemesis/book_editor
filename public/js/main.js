@@ -6,6 +6,8 @@ import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
 import { Pane } from './pane.js';
+import { quickOpen, quickOpenItems } from './quickopen.js';
+import { installShortcuts, showShortcutHelp } from './shortcuts.js';
 import {
   availableModes, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
 } from './tree.js';
@@ -16,7 +18,7 @@ const crumb = document.getElementById('crumb');
 const topbarActions = document.getElementById('topbar-actions');
 
 const TAB_LABELS = { manuscript: 'Manuscript', outline: 'Outline', codex: 'Codex' };
-const NOTHING_OPEN = 'Choose a scene, plot file or codex entry on the left.';
+const NOTHING_OPEN = 'Choose a scene, plot file or codex entry on the left, or press ⌘P to find one. Press ? for all shortcuts.';
 
 // The book screen is built once per book and updated as the route changes.
 // It has two panes: the main one shows the file in the address bar, the side
@@ -58,6 +60,7 @@ class BookView {
     this.sideWordsEl = h('span');
     this.chapterWordsEl = h('span');
     this.commitEl = h('span', { class: 'commit-state' });
+    this.connEl = h('span', { class: 'conn-state', hidden: true, title: 'Changes made outside the editor won’t show until it reconnects' }, 'Disconnected from the editor server; retrying…');
     this.gitBtn = h('button', { type: 'button', class: 'git-status', hidden: true, onclick: () => this.openRevisions() });
 
     this.el = h('div', { class: 'book' },
@@ -68,7 +71,7 @@ class BookView {
       h('section', { class: 'editor-area' },
         this.panesEl,
         h('div', { class: 'statusbar' },
-          this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.commitEl, this.gitBtn)));
+          this.wordsEl, this.sideWordsEl, this.chapterWordsEl, h('span', { class: 'spacer' }), this.connEl, this.commitEl, this.gitBtn)));
 
     this.history = new HistoryView({
       bookId: id,
@@ -109,10 +112,25 @@ class BookView {
     document.title = `${this.book.title} · Book Editor`;
     topbarActions.replaceChildren(this.draftBtn, this.historyBtn);
     this.mode = this.validMode(readStored(`mode:${this.id}`));
+    this.showNothingOpen();
     this.refreshGit({ now: true });
     this.events = connectEvents(this.id, {
       onBatch: (batch) => this.onDiskChanges(batch),
       onReconnect: () => this.onDiskChanges({ files: [], tree: true, git: true, resync: true }),
+      onStatus: (up) => {
+        // Brief blips are normal; only show a lasting disconnection. Each
+        // failed retry reports again, so the clock starts at the first one.
+        if (up) {
+          clearTimeout(this.connTimer);
+          this.connTimer = null;
+          this.connEl.hidden = true;
+        } else if (!this.connTimer && this.connEl.hidden) {
+          this.connTimer = setTimeout(() => {
+            this.connTimer = null;
+            this.connEl.hidden = false;
+          }, 3000);
+        }
+      },
     });
   }
 
@@ -121,6 +139,7 @@ class BookView {
     this.events?.close();
     clearTimeout(this.gitTimer);
     clearTimeout(this.historyTimer);
+    clearTimeout(this.connTimer);
   }
 
   // --- live reload -------------------------------------------------------------
@@ -280,7 +299,7 @@ class BookView {
         await this.main.open(path);
         this.adoptModeOf(this.main.file.path);
       } else {
-        this.main.close(NOTHING_OPEN);
+        this.showNothingOpen();
       }
       if (previous) this.checkpoint(`switched away from ${previous}`);
     }
@@ -288,6 +307,17 @@ class BookView {
     await this.syncSide();
     this.updateStatus();
     if (changed && path) this.main.focus();
+  }
+
+  // The main pane with no file: a nudge for an empty book, tips otherwise.
+  showNothingOpen() {
+    if (this.tree && !this.tree.chapters.length) {
+      this.main.close('This book has no chapters yet.', [
+        h('button', { type: 'button', class: 'primary', onclick: () => this.actions.addChapter() }, '+ Add the first chapter'),
+      ]);
+    } else {
+      this.main.close(NOTHING_OPEN);
+    }
   }
 
   showTab(tab, { updateHash = true } = {}) {
@@ -321,6 +351,48 @@ class BookView {
 
   open(tab, path) {
     location.hash = bookHref(this.id, tab, path);
+  }
+
+  // --- keyboard -------------------------------------------------------------------
+
+  async quickOpen() {
+    const items = quickOpenItems(this.tree, { sceneFileFor: (s) => sceneFile(s, this.mode) ?? sceneFiles(s)[0] });
+    const path = await quickOpen(items);
+    if (path) this.open(tabForPath(path), path);
+  }
+
+  // Moves to the previous or next scene, staying in the same kind of file
+  // (scene text in the current mode, or plot files).
+  stepScene(dir) {
+    const path = this.file?.path ?? '';
+    const scenes = this.tree.chapters.flatMap((ch) => ch.scenes.map((s) => ({ ch, s })));
+    const plot = path.startsWith('outline/');
+    const fileOf = ({ s }) => (plot ? (s.inOutline ? s.outlinePath : null) : sceneFile(s, this.mode));
+    let i = scenes.findIndex(({ s }) => s.outlinePath === path || sceneFiles(s).includes(path));
+    if (i === -1 && path.endsWith('/_chapter.md')) {
+      // From a chapter summary, "next" is its first scene.
+      const chName = path.split('/')[1];
+      i = scenes.findIndex(({ ch }) => ch.name === chName) - (dir > 0 ? 1 : 0);
+    }
+    if (i === -1 && !path) i = dir > 0 ? -1 : scenes.length;
+    if (i === -1 && path) return false;
+    for (let j = i + dir; j >= 0 && j < scenes.length; j += dir) {
+      const target = fileOf(scenes[j]);
+      if (target) {
+        this.open(plot ? 'outline' : 'manuscript', target);
+        return true;
+      }
+    }
+    toast(dir > 0 ? 'That was the last scene' : 'That was the first scene');
+    return true;
+  }
+
+  cycleView() {
+    const pane = this.side.el.contains(document.activeElement) && !this.side.el.hidden ? this.side : this.main;
+    if (!pane.file && !pane.readOnly) return false;
+    pane.setView({ edit: 'split', split: 'preview', preview: 'edit' }[pane.view]);
+    pane.focus();
+    return true;
   }
 
   // --- history -------------------------------------------------------------------
@@ -705,6 +777,7 @@ class BookView {
     }
     this.followChanges(res);
     await this.refreshTree();
+    if (!this.main.file && !this.main.readOnly) this.showNothingOpen();
     await this.syncSide();
     this.updateStatus();
     this.refreshGit();
@@ -915,6 +988,25 @@ function revert() {
   history.replaceState(null, '', hash);
   currentHash = hash;
 }
+
+installShortcuts({
+  help: () => showShortcutHelp(),
+  save: () => (bookView ? (bookView.save(), true) : false),
+  revision: () => (bookView ? (bookView.openRevisions(), true) : false),
+  quickOpen: () => (bookView ? (bookView.quickOpen(), true) : false),
+  prevScene: () => (bookView ? bookView.stepScene(-1) : false),
+  nextScene: () => (bookView ? bookView.stepScene(1) : false),
+  companion: () => (bookView && !bookView.companionBtn.hidden ? (bookView.toggleCompanion(), true) : false),
+  cycleView: () => (bookView ? bookView.cycleView() : false),
+  history: () => (bookView ? (bookView.openHistory(), true) : false),
+});
+document.getElementById('help-btn')?.addEventListener('click', () => showShortcutHelp());
+
+// Anything that fails without its own handling still gets said.
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || String(e.reason || 'Something went wrong');
+  toast(msg, { error: true, ms: 6000 });
+});
 
 window.addEventListener('hashchange', handleRoute);
 window.addEventListener('beforeunload', (e) => {

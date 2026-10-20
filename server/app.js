@@ -3,7 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { AutoCommitter } from './autocommit.js';
-import { createBook, forgetBook, getBook, getBookRoot, listBooks, registerBook } from './books.js';
+import {
+  createBook, forgetBook, getBook, getBookRoot, libraryExists, listBooks, registerBook,
+} from './books.js';
 import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
 import { configPath, loadConfig } from './config.js';
@@ -94,7 +96,11 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
   });
 
   api.get('/books', async (req, res) => {
-    res.json({ libraryRoot: req.config.libraryRoot, books: await listBooks(req.config) });
+    res.json({
+      libraryRoot: req.config.libraryRoot,
+      libraryExists: await libraryExists(req.config),
+      books: await listBooks(req.config),
+    });
   });
 
   api.post('/books', async (req, res) => {

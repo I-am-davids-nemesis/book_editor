@@ -12,7 +12,13 @@ async function request(method, url, body, { keepalive = false } = {}) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(url, opts);
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch {
+    // The server is gone (stopped, or the laptop slept through a restart).
+    throw new ApiError(0, { error: 'Can’t reach the editor server. Is `npm start` still running?' });
+  }
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, data);
   return data;

@@ -172,7 +172,7 @@ Each milestone ends with something usable, and gets tests before moving on.
    - ✅ **4c. Drafts.** Start a draft from any commit, switch drafts, current draft in the top bar's Draft menu and the graph. *Tests:* create/switch with checkpoint commits; invalid names.
 5. ✅ **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. ✅ **Compile.** Compile a chapter or the whole book, per narration mode, then download.
-7. **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.
+7. ✅ **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.
 8. **Claude Code.** Run Claude Code from the browser in the book's folder and stream its work back into a Claude panel (design in §9). This comes after live reload (step 5), so edits it makes show up in the open panes, and after git (step 4), so each run's changes can be reviewed as a diff. *Tests:* a fake agent stream (no real model calls) for streaming, approval round-trips, stop, and the before/after commits; a path check refusing writes outside the book. *Check:* ask it to draft a scene from its plot file while the plot is open, and watch the scene fill in.
 
 ## 7. Testing

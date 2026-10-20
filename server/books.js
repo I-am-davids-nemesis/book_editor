@@ -3,9 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { saveConfig } from './config.js';
 import { badRequest, conflict, notFound } from './errors.js';
-import { commitAll, initRepo } from './git.js';
+import { commitAll, git, initRepo } from './git.js';
 import { slugify, titleize } from './names.js';
 import { fillTemplate, scaffoldDir, today } from './templates.js';
+import { buildTree } from './tree.js';
 
 // Books in the library root use their folder name as id. Books registered
 // from elsewhere get a "~"-prefixed id stored in the config.
@@ -39,16 +40,43 @@ async function bookTitle(root) {
   return titleize(path.basename(root));
 }
 
+// Word count for the library card: the first narration mode the editor
+// offers (plain files if there are any).
+async function wordSummary(root) {
+  try {
+    const tree = await buildTree(root);
+    const mode = tree.hasBaseScenes || !tree.modes.length ? '' : tree.modes[0];
+    return { words: tree.wordsByMode[mode] || 0, wordsMode: mode, chapters: tree.chapters.length };
+  } catch {
+    return {};
+  }
+}
+
+async function lastCommit(root) {
+  try {
+    const out = (await git(root, ['log', '-1', '--format=%cI%x1f%s'])).trim();
+    if (!out) return null;
+    const [date, subject] = out.split('\x1f');
+    return { date, subject };
+  } catch {
+    return null; // not a repo, or no commits yet
+  }
+}
+
 async function describe(id, root, source) {
   const present = await isDir(root);
+  const isGit = present && (await exists(path.join(root, '.git')));
+  const hasManuscript = present && (await isDir(path.join(root, 'manuscript')));
   return {
     id,
     path: root,
     source,
     exists: present,
     title: present ? await bookTitle(root) : titleize(path.basename(root)),
-    isGit: present && (await exists(path.join(root, '.git'))),
-    hasManuscript: present && (await isDir(path.join(root, 'manuscript'))),
+    isGit,
+    hasManuscript,
+    ...(hasManuscript ? await wordSummary(root) : {}),
+    lastCommit: isGit ? await lastCommit(root) : null,
   };
 }
 
@@ -89,6 +117,10 @@ export async function listBooks(config) {
     if (!(await isLibraryChild(config, root))) books.push(await describe(id, root, 'registered'));
   }
   return books.sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export async function libraryExists(config) {
+  return isDir(path.resolve(config.libraryRoot));
 }
 
 export async function getBookRoot(config, id) {

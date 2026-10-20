@@ -1,2 +1,5 @@
 compiled/
 .DS_Store
+# Obsidian's per-device state (open panes, recent files) changes constantly;
+# keep it out of the book's history so autosave doesn't commit it.
+.obsidian/

@@ -1,6 +1,8 @@
 import { api } from './api.js';
 import { confirmDialog, formDialog } from './dialogs.js';
-import { bookHref, h, toast } from './ui.js';
+import { formatWhen } from './history.js';
+import { modeLabel } from './tree.js';
+import { bookHref, formatCount, h, toast } from './ui.js';
 
 function bookCard(book, onForget) {
   const tags = [];
@@ -19,8 +21,15 @@ function bookCard(book, onForget) {
     }, 'Remove from list')
     : null;
 
+  const stats = [];
+  if (book.words !== undefined) {
+    stats.push(`${formatCount(book.words)} words${book.wordsMode ? ` (${modeLabel(book.wordsMode)})` : ''}`);
+    stats.push(`${book.chapters} chapter${book.chapters === 1 ? '' : 's'}`);
+  }
   return h('a', { class: `book-card${book.exists ? '' : ' missing'}`, href: book.exists ? bookHref(book.id) : null },
     h('h2', {}, book.title),
+    stats.length ? h('div', { class: 'stats' }, stats.join(' · ')) : null,
+    book.lastCommit ? h('div', { class: 'stats muted', title: book.lastCommit.subject }, `Last commit ${formatWhen(book.lastCommit.date)}`) : null,
     h('div', { class: 'path' }, book.path),
     h('div', { class: 'tags' }, tags, forget));
 }
@@ -32,10 +41,14 @@ export async function renderLibrary(root) {
   const error = h('div', { class: 'error', role: 'alert' });
 
   async function refresh() {
-    const { libraryRoot, books } = await api.listBooks();
-    sub.textContent = `Library folder: ${libraryRoot}`;
+    const { libraryRoot, libraryExists, books } = await api.listBooks();
+    sub.textContent = `Library folder: ${libraryRoot}${libraryExists ? '' : ' (not created yet; your first new book creates it)'}`;
     grid.replaceChildren(...books.map((b) => bookCard(b, forget)));
-    if (!books.length) grid.replaceChildren(h('div', { class: 'empty' }, 'No books yet. Create one, or open an existing folder below.'));
+    if (!books.length) {
+      grid.replaceChildren(h('div', { class: 'empty' },
+        h('p', {}, 'No books yet.'),
+        h('p', {}, 'Use “+ New book” to start one: it gets manuscript/, outline/ and codex/ folders and its own git repository. Or open a folder you already have, below.')));
+    }
   }
 
   async function forget(book) {
