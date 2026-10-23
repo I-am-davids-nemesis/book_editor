@@ -223,3 +223,14 @@ test('events stream reports file changes', async () => {
   assert.equal(got.files.find((f) => f.path === 'manuscript/hello.md').exists, true);
 });
 
+
+test('search over HTTP', async () => {
+  const r = await call('GET', '/api/books/sample/search?q=dorgal&scope=all');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.files.map((f) => f.path), [
+    'manuscript/01-the-washing-house/02-dorgal-arrives.md',
+    'outline/01-the-washing-house/02-dorgal-arrives.md',
+  ]);
+  assert.equal((await call('GET', '/api/books/sample/search?q=dorgal&case=1')).data.total, 0);
+  assert.equal((await call('GET', '/api/books/sample/search?q=')).status, 400);
+});

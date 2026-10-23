@@ -18,6 +18,7 @@ import {
 } from './history.js';
 import { buildImportMap } from './importmap.js';
 import { serialized } from './queue.js';
+import { searchBook } from './search.js';
 import {
   addChapter, addScene, createMissing, deleteChapter, deleteScene,
   renameChapter, renameScene, reorderChapters, reorderScenes,
@@ -158,6 +159,13 @@ export function createApp({
     const result = await writeBookFile(root, rel, content, { baseHash, force: force === true });
     autoCommitter.changed(root);
     res.json(result);
+  });
+
+  api.get('/books/:id/search', async (req, res) => {
+    const { q, case: caseSensitive, word, scope } = req.query;
+    res.json(await searchBook(await bookRoot(req), {
+      query: q, caseSensitive: caseSensitive === '1', wholeWord: word === '1', scope: scope || 'all',
+    }));
   });
 
   // Commits all changes in the book now, if there are any (the editor calls

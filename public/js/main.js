@@ -8,6 +8,7 @@ import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
 import { Pane } from './pane.js';
 import { quickOpen, quickOpenItems } from './quickopen.js';
+import { searchDialog } from './search.js';
 import { installShortcuts, showShortcutHelp } from './shortcuts.js';
 import {
   availableModes, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
@@ -104,6 +105,7 @@ class BookView {
     });
     this.el.append(this.claude.el);
     this.claudeBtn = h('button', { type: 'button', class: 'claude-btn', title: 'Claude Code in this book (⌘⌥C)', onclick: () => this.toggleClaude() }, 'Claude');
+    this.searchBtn = h('button', { type: 'button', class: 'search-btn', title: 'Search the whole book (⌘⇧F)', onclick: () => this.search() }, 'Search');
     this.historyBtn = h('button', { type: 'button', class: 'history-btn', onclick: () => this.openHistory() }, 'History');
     this.draftBtn = h('button', {
       type: 'button',
@@ -124,7 +126,7 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
-    topbarActions.replaceChildren(this.draftBtn, this.historyBtn, this.claudeBtn);
+    topbarActions.replaceChildren(this.draftBtn, this.searchBtn, this.historyBtn, this.claudeBtn);
     if (readStored('claude') === 'open') this.toggleClaude(true);
     else this.claudeBtn.setAttribute('aria-pressed', 'false');
     this.mode = this.validMode(readStored(`mode:${this.id}`));
@@ -325,6 +327,8 @@ class BookView {
     this.updateStatus();
     this.claude.refreshContext();
     if (changed && path) this.main.focus();
+    if (this.pendingReveal && this.pendingReveal.path === this.main.file?.path) this.main.reveal(this.pendingReveal);
+    this.pendingReveal = null;
   }
 
   // The main pane with no file: a nudge for an empty book, tips otherwise.
@@ -377,6 +381,20 @@ class BookView {
     const items = quickOpenItems(this.tree, { sceneFileFor: (s) => sceneFile(s, this.mode) ?? sceneFiles(s)[0] });
     const path = await quickOpen(items);
     if (path) this.open(tabForPath(path), path);
+  }
+
+  // Full-text search (⌘⇧F). The search reads files from disk, so pending
+  // edits are saved first; choosing a match opens its file and selects it.
+  async search() {
+    await this.save();
+    const hit = await searchDialog({ bookId: this.id, tree: this.tree });
+    if (!hit) return;
+    if (this.main.file?.path === hit.path && !this.el.classList.contains('show-history')) {
+      this.main.reveal(hit);
+    } else {
+      this.pendingReveal = hit;
+      this.open(tabForPath(hit.path), hit.path);
+    }
   }
 
   // Moves to the previous or next scene, staying in the same kind of file
@@ -1065,6 +1083,7 @@ installShortcuts({
   save: () => (bookView ? (bookView.save(), true) : false),
   revision: () => (bookView ? (bookView.openRevisions(), true) : false),
   quickOpen: () => (bookView ? (bookView.quickOpen(), true) : false),
+  search: () => (bookView ? (bookView.search(), true) : false),
   prevScene: () => (bookView ? bookView.stepScene(-1) : false),
   nextScene: () => (bookView ? bookView.stepScene(1) : false),
   companion: () => (bookView && !bookView.companionBtn.hidden ? (bookView.toggleCompanion(), true) : false),

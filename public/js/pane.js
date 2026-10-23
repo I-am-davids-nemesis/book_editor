@@ -158,6 +158,14 @@ export class Pane {
     else this.editor.focus();
   }
 
+  // Selects a search match in the text, switching Preview to Split so the
+  // selection can be seen.
+  reveal({ line, col, length }) {
+    if (this.view === 'preview') this.setView('split');
+    this.editor.reveal(line, col, length);
+    this.editor.focus();
+  }
+
   // Follows a structure change: the file moved, or was deleted.
   follow({ moves = [], deleted = [] }) {
     const p = this.file?.path;

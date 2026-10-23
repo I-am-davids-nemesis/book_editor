@@ -11,6 +11,7 @@ export const SHORTCUTS = [
   { id: 'save', mod: true, code: 'KeyS', label: `${MOD}S`, help: 'Save now (edits also save by themselves)' },
   { id: 'revision', mod: true, shift: true, code: 'KeyS', label: `${MOD}${SHIFT}S`, help: 'Save revision (a named commit)' },
   { id: 'quickOpen', mod: true, code: 'KeyP', label: `${MOD}P`, help: 'Find and open a file' },
+  { id: 'search', mod: true, shift: true, code: 'KeyF', label: `${MOD}${SHIFT}F`, help: 'Search the whole book' },
   { id: 'prevScene', mod: true, alt: true, key: 'ArrowUp', label: `${MOD}${ALT}↑`, help: 'Previous scene' },
   { id: 'nextScene', mod: true, alt: true, key: 'ArrowDown', label: `${MOD}${ALT}↓`, help: 'Next scene' },
   { id: 'companion', mod: true, alt: true, code: 'KeyP', label: `${MOD}${ALT}P`, help: 'Show or hide the plot (or scene) beside the file' },

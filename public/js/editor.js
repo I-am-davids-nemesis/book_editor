@@ -92,6 +92,16 @@ export class Editor {
     return this.view.state.sliceDoc(from, to);
   }
 
+  // Selects `length` characters at `col` on line `lineNo` (1-based) and
+  // scrolls them to the middle of the view.
+  reveal(lineNo, col, length) {
+    const { doc } = this.view.state;
+    const line = doc.line(Math.min(Math.max(1, lineNo), doc.lines));
+    const from = Math.min(line.from + col, line.to);
+    const to = Math.min(from + length, line.to);
+    this.view.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+  }
+
   markSaved(content) {
     this.savedContent = content;
   }

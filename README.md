@@ -71,6 +71,13 @@ A scene can exist in several modes as `01-opening.camera.md`, `01-opening.rotati
 - Word counts update as you type: in the status bar (file, plot, chapter) and the sidebar (scene, chapter, book).
 - Sidebar word counts cover the manuscript only.
 
+### Searching the book
+
+- **⌘⇧F**, or **Search** in the top bar, searches every Markdown file in the book: scenes in every mode, plot files and the codex.
+- Results are grouped by file, in book order, with each match shown in its sentence. Click one, or use ↑/↓ and Enter, to open the file with the match selected.
+- **Match case**, **Whole words** and the scope menu (Whole book, Manuscript, Outline, Codex) narrow it. The search is plain text, and straight and curly quotes match each other, so `don't` finds `don’t`.
+- `compiled/` and hidden folders such as `.obsidian` are skipped. The dialog remembers your last search until you reload the page.
+
 ## Saving and versions
 
 - **Saving.** Edits save to disk about a second after you stop typing, and at least every 5 seconds while you keep typing. **⌘S** saves at once.
@@ -139,6 +146,7 @@ Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘
 | ⌘S | Save now |
 | ⌘⇧S | Save revision |
 | ⌘P | Find and open a file |
+| ⌘⇧F | Search the whole book |
 | ⌘⌥↑ / ⌘⌥↓ | Previous / next scene (in the same mode, or plot to plot) |
 | ⌘⌥P | Show or hide the plot (or scene) beside the file |
 | ⌘E | Edit → Split → Preview, in the pane you are in |

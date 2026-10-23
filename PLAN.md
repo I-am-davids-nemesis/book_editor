@@ -185,11 +185,11 @@ Each milestone ends with something usable, and gets tests before moving on.
 
 ## 8. Later (not v1)
 
-- Scene variants (`01-opening.camera.md`), with a switcher and side-by-side compare.
+- Side-by-side compare of a scene's narration modes (the modes themselves are built).
 - Moving scenes between chapters by drag and drop.
 - `[[wikilink]]` autocomplete and click-through to codex entries.
 - Tags, and merging one branch's changes into another from the History view.
-- Full-text search across the book.
+- Search and replace across the book (full-text search is built: `server/search.js`, ⌘⇧F).
 
 ## 9. Claude Code integration (step 8)
 

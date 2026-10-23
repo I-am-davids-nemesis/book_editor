@@ -450,6 +450,16 @@ button.companion-toggle[aria-pressed="true"] { background: var(--accent-soft); b
 .quick-list li.active { background: var(--accent-soft); }
 .quick-label { font-weight: 600; }
 .quick-detail { color: var(--muted); font-size: 12px; }
+.search-dialog { width: min(720px, calc(100vw - 32px)); }
+.search-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 14px; border-bottom: 1px solid var(--divider); font-size: 13px; }
+.search-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.search-options .spacer { flex: 1; }
+.search-results { max-height: 60vh; }
+.search-results li.search-file { cursor: default; margin-top: 6px; padding-bottom: 2px; }
+.search-results li.search-file:first-child { margin-top: 0; }
+.search-count { margin-left: auto; font-size: 12px; }
+.search-results li.search-match { display: block; padding: 4px 10px 4px 22px; font: 14px/1.45 var(--prose-font); overflow-wrap: anywhere; }
+.search-results mark { background: var(--warn-bg); color: inherit; outline: 1px solid var(--warn-border); border-radius: 2px; }
 table.shortcuts { border-collapse: collapse; }
 table.shortcuts td { padding: 4px 12px 4px 0; vertical-align: top; }
 kbd { font: 12px var(--mono-font); padding: 1px 6px; border: 1px solid var(--divider); border-bottom-width: 2px; border-radius: 4px; background: var(--bg); white-space: pre; }
