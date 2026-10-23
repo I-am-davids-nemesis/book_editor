@@ -30,6 +30,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     if (stopping) process.exit(1);
     stopping = true;
     server.close();
+    await app.locals.claude.stopAll(); // commits what each run changed so far
     await app.locals.autoCommitter.flush();
     process.exit(0);
   });

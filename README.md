@@ -119,6 +119,17 @@ A scene can exist in several modes as `01-opening.camera.md`, `01-opening.rotati
 - Output goes to `compiled/`, for example `book.camera.md` or `02-the-courtyard.md`, which is gitignored.
 - The dialog shows a preview with **Download .md** and **Copy**, and lists any scenes missing in that mode.
 
+## Claude
+
+**Claude** in the top bar (or **⌘⌥C**) opens a panel on the right that runs Claude Code in the book's folder, using your existing Claude Code login. You need Claude Code installed and logged in (run `claude` once in a terminal).
+
+- **Context.** Chips above the prompt show what's sent with it: the open file, the file beside it, and any selected text. Click a chip to leave it out. When the prompt is empty, buttons offer common starting points, such as "Draft this scene from its plot".
+- **Live edits.** Files Claude changes reload in your panes as it works. If you have unsaved typing in a pane it changes, you get the usual "changed on disk" banner.
+- **Commits.** Your work is committed before each run. Claude's changes are committed after it as `Claude: <first line of the prompt>`. After a run, the panel lists the changed files, with **Review changes** (opens History at that commit) and **Undo this run** (puts the whole book back as it was before the run, as a new commit).
+- **Limits.** Claude can read and search the book, and create or edit files inside it, never outside it or in `.git`. Bash and web tools are off. The ⋯ menu can switch them to "ask each time", which shows an **Allow / Deny** card for each request.
+- **Conversation.** Follow-up prompts continue the same conversation, even after a reload or a restart. **New conversation** starts fresh. Session ids and transcripts are kept in `~/.config/book-editor/claude/`, not in the book.
+- **Stop** ends a run. Anything it changed by then is still committed.
+
 ## Keyboard shortcuts
 
 Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘ is Ctrl and ⌥ is Alt.
@@ -132,6 +143,7 @@ Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘
 | ⌘⌥P | Show or hide the plot (or scene) beside the file |
 | ⌘E | Edit → Split → Preview, in the pane you are in |
 | ⌘⌥H | History |
+| ⌘⌥C | Show or hide the Claude panel |
 | ⌘F | Find in the file |
 | Esc | Close History, a dialog or a menu |
 
@@ -140,6 +152,7 @@ Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘
 - **"Can't reach the editor server."** The server stopped. Run `npm start` again. Your typing is still in the page and saves once the server is back.
 - **"Port 4321 is in use."** Another copy is running, or something else uses the port. Stop it, or use `PORT=5000 npm start`.
 - **"Auto-commit failed"** in the status bar. Hover over it to see git's message. Usually git's name or email isn't set (see Setup).
+- **Claude says it could not sign in.** Run `claude` in a terminal and log in. If `ANTHROPIC_API_KEY` is set in the shell that started the editor, Claude Code uses it instead of your login, so check that it's valid, or unset it.
 - **Push fails asking for a password.** Set up an SSH key, or a credential helper for HTTPS remotes.
 
 ## Test

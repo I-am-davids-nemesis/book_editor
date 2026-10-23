@@ -20,7 +20,7 @@ const VIEWS = { edit: 'Edit', split: 'Split', preview: 'Preview' };
 export class Pane {
   constructor({
     bookId, role, view = 'edit', headExtras = [],
-    onChange = () => {}, onView = () => {}, onSaved = () => {}, onCloseRequest = () => {},
+    onChange = () => {}, onView = () => {}, onSaved = () => {}, onCloseRequest = () => {}, onSelect = () => {},
   }) {
     this.bookId = bookId;
     this.role = role;
@@ -63,6 +63,7 @@ export class Pane {
         this.onChange(this);
       },
       onSave: () => this.save(),
+      onSelect: () => onSelect(this),
     });
     this.setView(view, { notify: false });
     this.close();
@@ -74,6 +75,10 @@ export class Pane {
 
   get content() {
     return this.editor.content;
+  }
+
+  get selection() {
+    return this.file || this.readOnly ? this.editor.selection : '';
   }
 
   get words() {

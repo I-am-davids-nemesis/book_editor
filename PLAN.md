@@ -84,6 +84,7 @@ local_editor/
     queue.js              # one job at a time per book (structure changes, commits)
     watch.js              # fs.watch(recursive) per open book → SSE events (debounced, ignores .git)
     compile.js            # join scenes into a chapter or book .md, per mode; book.json settings
+    claude.js             # Claude Code runs via the Agent SDK: permission policy, events, before/after commits
   bin/compile.mjs         # command-line compile for agents (same rules as the dialog)
   templates/book/         # scaffold copied into every new book
   public/
@@ -99,6 +100,7 @@ local_editor/
       pane.js             # one open file: editor, Edit/Split/Preview, autosave, conflict banner
       gitpanel.js         # Save revision panel: changed files, message, Push
       history.js          # History view: commit graph, details, word diffs, compare, restore
+      claude.js           # Claude panel: transcript, prompt, context chips, approval cards
       graph.js            # autosave folding and lane layout for the graph (pure, tested)
       dialogs.js          # prompt/confirm modals
       wordcount.js        # shared with the server, so both count the same way
@@ -173,7 +175,7 @@ Each milestone ends with something usable, and gets tests before moving on.
 5. ✅ **Live reload.** Add the watcher, SSE, the 409 conflict flow and banners. *Check:* edit the open scene from the terminal while it's clean, and again while it's dirty.
 6. ✅ **Compile.** Compile a chapter or the whole book, per narration mode, then download.
 7. ✅ **Polish.** Keyboard shortcuts, empty states, error toasts, a README with setup steps, and a check that a scaffolded book opens cleanly in Obsidian.
-8. **Claude Code.** Run Claude Code from the browser in the book's folder and stream its work back into a Claude panel (design in §9). This comes after live reload (step 5), so edits it makes show up in the open panes, and after git (step 4), so each run's changes can be reviewed as a diff. *Tests:* a fake agent stream (no real model calls) for streaming, approval round-trips, stop, and the before/after commits; a path check refusing writes outside the book. *Check:* ask it to draft a scene from its plot file while the plot is open, and watch the scene fill in.
+8. ✅ **Claude Code.** Run Claude Code from the browser in the book's folder and stream its work back into a Claude panel (design in §9). This comes after live reload (step 5), so edits it makes show up in the open panes, and after git (step 4), so each run's changes can be reviewed as a diff. *Tests:* a fake agent stream (no real model calls) for streaming, approval round-trips, stop, and the before/after commits; a path check refusing writes outside the book. *Check:* ask it to draft a scene from its plot file while the plot is open, and watch the scene fill in.
 
 ## 7. Testing
 
@@ -201,8 +203,10 @@ Each milestone ends with something usable, and gets tests before moving on.
 **Permissions.**
 - Read, Glob and Grep are allowed.
 - Edit and Write are allowed only for paths inside the book. Anything else is refused in the permission callback, whatever the model asks.
-- Bash and web tools are off by default. A per-book setting can switch them to "ask".
+- Bash and web tools are off by default. A per-book setting can switch them to "ask". The setting lives in the editor's config directory (with the session), not in `book.json`, so an agent can't change it.
 - In "ask" mode, each request shows in the panel as an Allow / Deny card.
+- Reads outside the book also get a card, rather than being refused.
+- Only project settings are loaded (`settingSources: ['project']`). The rules are enforced twice: once in the permission callback, and again in a `PreToolUse` hook. The hook runs even when a settings file allows a tool, so no settings file can widen what a run may do.
 
 **Git and saving.**
 - Before a run, the editor saves both panes and takes a checkpoint commit, so the agent's changes are separate from yours.
@@ -218,7 +222,9 @@ Each milestone ends with something usable, and gets tests before moving on.
 | GET | `/:id/claude/runs/:run/events` | SSE: `text`, `tool`, `permission`, `files`, `result`, `error` |
 | POST | `/:id/claude/runs/:run/permission` | `{requestId, allow}` |
 | POST | `/:id/claude/runs/:run/stop` | Abort the run (changes so far are still committed) |
-| GET | `/:id/claude/session` | The current conversation's transcript, to restore the panel on reload |
+| GET | `/:id/claude/session` | The current conversation's transcript, to restore the panel on reload, plus the running run's id |
+| DELETE | `/:id/claude/session` | New conversation: forget the session id and transcript |
+| PUT | `/:id/claude/settings` | `{extraTools: off\|ask}` |
 
 **UI.**
 - A **Claude** drawer docks to the right of the panes. It has the transcript, a prompt box, chips for what's attached (scene, plot, selection; each can be removed), **Stop**, **New conversation** and approval cards.

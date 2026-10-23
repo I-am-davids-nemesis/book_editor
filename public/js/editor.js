@@ -31,8 +31,9 @@ const proseTheme = EditorView.theme({
 // One CodeMirror view, reused for every file. Opening a file swaps in a fresh
 // state, so undo history never leaks between files.
 export class Editor {
-  constructor(host, { onChange, onSave }) {
+  constructor(host, { onChange, onSave, onSelect = () => {} }) {
     this.onChange = onChange;
+    this.onSelect = onSelect;
     this.onSave = onSave;
     this.savedContent = '';
     this.extensions = [
@@ -54,6 +55,7 @@ export class Editor {
       ]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) this.onChange();
+        if (update.selectionSet || update.focusChanged) this.onSelect();
       }),
     ];
     this.view = new EditorView({ parent: host, state: EditorState.create({ doc: '', extensions: this.extensions }) });
@@ -82,6 +84,12 @@ export class Editor {
 
   get dirty() {
     return this.content !== this.savedContent;
+  }
+
+  // The selected text (main selection), or '' if nothing is selected.
+  get selection() {
+    const { from, to } = this.view.state.selection.main;
+    return this.view.state.sliceDoc(from, to);
   }
 
   markSaved(content) {

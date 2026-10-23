@@ -6,7 +6,8 @@ export const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 
 // Commits everything that changed in the book, if anything did. Runs in the
 // book's queue so it never lands in the middle of a structure change.
-export function checkpoint(root, reason = '') {
+// `message(changes)` replaces the usual "Autosave: …" message.
+export function checkpoint(root, reason = '', { message } = {}) {
   return serialized(root, async () => {
     if (!(await isRepo(root))) return { committed: false, reason: 'not a git repository' };
     if (!(await git(root, ['status', '--porcelain'])).trim()) return { committed: false };
@@ -17,9 +18,9 @@ export function checkpoint(root, reason = '') {
         return { status: status[0], path: paths.at(-1), from: paths.length > 1 ? paths[0] : undefined };
       });
     if (!changes.length) return { committed: false };
-    await git(root, ['commit', '-q', '-m', commitMessage(changes, reason)]);
+    await git(root, ['commit', '-q', '-m', message ? message(changes) : commitMessage(changes, reason)]);
     const commit = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim();
-    return { committed: true, commit, files: changes.map((c) => c.path) };
+    return { committed: true, commit, files: changes.map((c) => c.path), changes };
   });
 }
 

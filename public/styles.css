@@ -657,3 +657,82 @@ svg.graph .lane-5.dot { fill: var(--lane-5); }
   .history-list { flex: 1 1 45%; min-height: 0; }
   .history-detail { flex: 1 1 55%; padding: 12px 16px 40px; }
 }
+
+/* ---- Claude panel ---- */
+
+.book.show-history > .claude-panel { display: none; }
+.claude-panel {
+  width: 380px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sidebar);
+  border-left: 2px solid var(--divider);
+}
+.claude-panel[hidden] { display: none; }
+.claude-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--divider); min-height: 39px; }
+.claude-head h2 { font: 600 14px var(--ui-font); margin: 0; }
+.claude-head .spacer { flex: 1; }
+.claude-head button { font-size: 12px; padding: 2px 8px; }
+.claude-status { color: var(--muted); font-size: 12px; }
+.claude-status.busy::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: claude-pulse 1.2s ease-in-out infinite;
+}
+@keyframes claude-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .claude-status.busy::before { animation: none; } }
+
+.claude-log { flex: 1; min-height: 0; overflow-y: scroll; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.claude-welcome { font-size: 13px; line-height: 1.5; }
+.claude-welcome p { margin: 0 0 8px; }
+.claude-msg { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.claude-user { align-self: flex-end; max-width: 90%; padding: 8px 10px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--divider); }
+.claude-prompt { white-space: pre-wrap; }
+.claude-attached { font-size: 11px; margin-top: 4px; }
+.claude-assistant { padding: 2px 2px; }
+.claude-md > :first-child { margin-top: 0; }
+.claude-md > :last-child { margin-bottom: 0; }
+.claude-md p, .claude-md ul, .claude-md ol { margin: 0 0 8px; }
+.claude-md ul, .claude-md ol { padding-left: 20px; }
+.claude-md pre { overflow-x: auto; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font: 12px var(--mono-font); }
+.claude-md code { font: 0.9em var(--mono-font); }
+.claude-md h1, .claude-md h2, .claude-md h3 { font-size: 14px; margin: 10px 0 4px; }
+.claude-tool { display: flex; flex-direction: column; gap: 2px; padding: 3px 8px; border-left: 3px solid var(--divider); color: var(--muted); font: 12px var(--mono-font); overflow-wrap: anywhere; }
+.claude-tool.failed { border-left-color: var(--danger); }
+.claude-tool-error { color: var(--danger); font-family: var(--ui-font); }
+.claude-error { color: var(--danger); padding: 6px 8px; border: 1px solid var(--danger); border-radius: 6px; background: var(--surface); }
+.claude-card { padding: 8px 10px; border: 1px solid var(--warn-border); border-radius: 8px; background: var(--warn-bg); font-size: 13px; }
+.claude-card-title { overflow-wrap: anywhere; }
+.claude-card-detail { margin: 6px 0 0; max-height: 160px; overflow: auto; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font: 12px var(--mono-font); white-space: pre-wrap; }
+.claude-card-buttons { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 8px; }
+.claude-allowed { color: var(--ins-text); font-weight: 600; }
+.claude-denied { color: var(--danger); font-weight: 600; }
+.claude-files { padding: 8px 0 6px; border: 1px solid var(--divider); border-radius: 8px; background: var(--surface); font-size: 13px; }
+.claude-files.muted { padding: 4px 10px; border: none; background: none; font-size: 12px; }
+.claude-files-head { padding: 0 12px 4px; font-weight: 600; }
+.claude-files ul { list-style: none; margin: 0; padding: 0; }
+.claude-files-actions { display: flex; gap: 8px; padding: 6px 12px 0; flex-wrap: wrap; }
+.claude-files-actions button { font-size: 12px; }
+.claude-done { font-size: 11px; text-align: center; padding-bottom: 6px; border-bottom: 1px dashed var(--divider); }
+
+.claude-compose { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 10px; border-top: 1px solid var(--divider); }
+.claude-compose textarea { width: 100%; resize: vertical; min-height: 60px; max-height: 40vh; font: 14px/1.5 var(--ui-font); }
+.claude-chips, .claude-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.claude-chips[hidden], .claude-quick[hidden] { display: none; }
+.claude-chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; border-color: var(--accent); color: var(--accent); background: var(--accent-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.claude-chip.off { border-style: dashed; border-color: var(--divider); color: var(--muted); background: transparent; }
+button.quick { font-size: 12px; padding: 2px 8px; text-align: left; }
+.claude-actions { display: flex; align-items: center; gap: 8px; }
+.claude-actions .spacer { flex: 1; }
+.claude-hint { font-size: 11px; }
+
+@media (max-width: 720px) {
+  .claude-panel { width: auto; max-height: 60vh; border-left: none; border-top: 2px solid var(--divider); }
+}

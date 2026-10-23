@@ -6,8 +6,12 @@ export class ApiError extends Error {
   }
 }
 
+// A random token from the server, embedded in the page; the Claude routes
+// refuse requests without it.
+export const TOKEN = typeof document === 'undefined' ? '' : document.querySelector('meta[name="editor-token"]')?.content || '';
+
 async function request(method, url, body, { keepalive = false } = {}) {
-  const opts = { method, headers: {}, keepalive };
+  const opts = { method, headers: { 'X-Editor-Token': TOKEN }, keepalive };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -50,6 +54,15 @@ export const api = {
   gitSwitch: (id, branch) => request('POST', `${book(id)}/git/switch`, { branch }),
   gitRestoreBook: (id, rev) => request('POST', `${book(id)}/git/restore-book`, { rev }),
   gitCompare: (id, { from, to }) => request('GET', `${book(id)}/git/compare?${new URLSearchParams({ ...(from ? { from } : {}), to })}`),
+
+  claudeSession: (id) => request('GET', `${book(id)}/claude/session`),
+  claudeClear: (id) => request('DELETE', `${book(id)}/claude/session`),
+  claudeSettings: (id, settings) => request('PUT', `${book(id)}/claude/settings`, settings),
+  claudeStart: (id, { prompt, context, newSession }) => request('POST', `${book(id)}/claude/runs`, { prompt, context, newSession }),
+  claudeAnswer: (id, run, requestId, allow) =>
+    request('POST', `${book(id)}/claude/runs/${encodeURIComponent(run)}/permission`, { requestId, allow }),
+  claudeStop: (id, run) => request('POST', `${book(id)}/claude/runs/${encodeURIComponent(run)}/stop`),
+  claudeEventsUrl: (id, run) => `${book(id)}/claude/runs/${encodeURIComponent(run)}/events?token=${encodeURIComponent(TOKEN)}`,
 
   createBook: (title, remote) => request('POST', '/api/books', { title, remote }),
 

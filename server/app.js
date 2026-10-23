@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ import { AutoCommitter } from './autocommit.js';
 import {
   createBook, forgetBook, getBook, getBookRoot, libraryExists, listBooks, registerBook,
 } from './books.js';
+import { ClaudeService } from './claude.js';
 import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
 import { configPath, loadConfig } from './config.js';
@@ -59,9 +61,29 @@ function requireJson(req, res, next) {
   next();
 }
 
-export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
+// The Claude routes can edit the book through an agent, so they also need a
+// random token that only the editor's own page has (embedded in index.html).
+// EventSource can't set headers, so GETs may pass it as ?token=.
+function requireToken(token) {
+  const expected = Buffer.from(token);
+  return (req, res, next) => {
+    const given = Buffer.from(String(req.headers['x-editor-token'] || (req.method === 'GET' ? req.query.token : '') || ''));
+    if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
+      return res.status(403).json({ error: 'Missing or wrong editor token; reload the page' });
+    }
+    next();
+  };
+}
+
+export function createApp({
+  autoCommitter = new AutoCommitter(),
+  claude = new ClaudeService({ onCommitted: (root) => autoCommitter.committed(root) }),
+  token = crypto.randomBytes(24).toString('hex'),
+} = {}) {
   const app = express();
   app.locals.autoCommitter = autoCommitter;
+  app.locals.claude = claude;
+  app.locals.token = token;
   app.disable('x-powered-by');
   app.use(localOnly);
   app.use(requireJson);
@@ -69,7 +91,8 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
 
   const { importMap, packages } = buildImportMap(path.join(projectRoot, 'node_modules'));
   const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8')
-    .replace('__IMPORT_MAP__', JSON.stringify(importMap, null, 2));
+    .replace('__IMPORT_MAP__', JSON.stringify(importMap, null, 2))
+    .replace('__EDITOR_TOKEN__', token);
 
   const sendIndex = (req, res) => res.type('html').set('Cache-Control', 'no-store').send(indexHtml);
   app.get('/', sendIndex);
@@ -263,6 +286,62 @@ export function createApp({ autoCommitter = new AutoCommitter() } = {}) {
   api.post('/books/:id/codex', structureRoute((root, req) => addCodexEntry(root, req.body)));
   api.patch('/books/:id/codex', structureRoute((root, req) => renameCodexEntry(root, req.body?.path, req.body)));
   api.delete('/books/:id/codex', structureRoute((root, req) => deleteCodexEntry(root, req.query.path)));
+
+  // --- Claude ---
+  const claudeRoutes = express.Router({ mergeParams: true });
+  claudeRoutes.use(requireToken(token));
+
+  claudeRoutes.get('/session', async (req, res) => {
+    res.json(await claude.session(await bookRoot(req)));
+  });
+
+  claudeRoutes.delete('/session', async (req, res) => {
+    res.json(await claude.clear(await bookRoot(req)));
+  });
+
+  claudeRoutes.put('/settings', async (req, res) => {
+    res.json(await claude.setSettings(await bookRoot(req), { extraTools: req.body?.extraTools }));
+  });
+
+  claudeRoutes.post('/runs', async (req, res) => {
+    const { prompt, context, newSession } = req.body || {};
+    res.status(201).json(await claude.start(await bookRoot(req), { prompt, context, newSession }));
+  });
+
+  // The run's events from the start (or after Last-Event-ID), then live.
+  // An `end` event says the run is over.
+  claudeRoutes.get('/runs/:run/events', async (req, res) => {
+    const run = claude.run(req.params.run, await bookRoot(req));
+    const after = Number(req.headers['last-event-id'] ?? req.query.after ?? -1);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+    });
+    res.write('retry: 2000\n\n');
+    const unsubscribe = run.subscribe((e) => {
+      if (e) res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
+      else res.write('event: end\ndata: {}\n\n');
+    }, Number.isFinite(after) ? after : -1);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    req.on('close', () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  });
+
+  claudeRoutes.post('/runs/:run/permission', async (req, res) => {
+    const run = claude.run(req.params.run, await bookRoot(req));
+    run.answer(req.body?.requestId, req.body?.allow === true);
+    res.json({ ok: true });
+  });
+
+  claudeRoutes.post('/runs/:run/stop', async (req, res) => {
+    claude.run(req.params.run, await bookRoot(req)).stop();
+    res.json({ ok: true });
+  });
+
+  api.use('/books/:id/claude', claudeRoutes);
 
   api.use((req, res) => res.status(404).json({ error: `No such API route: ${req.method} ${req.path}` }));
 

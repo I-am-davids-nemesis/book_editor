@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { ClaudePanel } from './claude.js';
 import { confirmDialog, formDialog, promptDialog } from './dialogs.js';
 import { openCompileDialog } from './compile.js';
 import { connectEvents } from './events.js';
@@ -48,6 +49,7 @@ class BookView {
       onView: (v) => writeStored(`view:${role}`, v),
       onSaved: () => this.refreshGit(),
       onCloseRequest: (pane) => this.closePane(pane),
+      onSelect: () => this.claude?.refreshContext(),
     });
     this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn] });
     this.sideModeEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode of the scene', hidden: true });
@@ -90,6 +92,18 @@ class BookView {
       },
     });
     this.el.append(this.history.el);
+
+    this.claude = new ClaudePanel({
+      bookId: id,
+      getContext: () => this.claudeContext(),
+      beforeRun: () => this.save(),
+      onOpenFile: (p) => this.open(tabForPath(p), p),
+      onReview: (commit) => { location.hash = bookHref(this.id, 'history', commit); },
+      onUndo: (before) => this.undoClaudeRun(before),
+      onClose: () => this.toggleClaude(false),
+    });
+    this.el.append(this.claude.el);
+    this.claudeBtn = h('button', { type: 'button', class: 'claude-btn', title: 'Claude Code in this book (⌘⌥C)', onclick: () => this.toggleClaude() }, 'Claude');
     this.historyBtn = h('button', { type: 'button', class: 'history-btn', onclick: () => this.openHistory() }, 'History');
     this.draftBtn = h('button', {
       type: 'button',
@@ -110,7 +124,9 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
-    topbarActions.replaceChildren(this.draftBtn, this.historyBtn);
+    topbarActions.replaceChildren(this.draftBtn, this.historyBtn, this.claudeBtn);
+    if (readStored('claude') === 'open') this.toggleClaude(true);
+    else this.claudeBtn.setAttribute('aria-pressed', 'false');
     this.mode = this.validMode(readStored(`mode:${this.id}`));
     this.showNothingOpen();
     this.refreshGit({ now: true });
@@ -137,6 +153,7 @@ class BookView {
   // Leaving the book.
   dispose() {
     this.events?.close();
+    this.claude.dispose();
     clearTimeout(this.gitTimer);
     clearTimeout(this.historyTimer);
     clearTimeout(this.connTimer);
@@ -306,6 +323,7 @@ class BookView {
     this.showTab(nextTab, { updateHash: false });
     await this.syncSide();
     this.updateStatus();
+    this.claude.refreshContext();
     if (changed && path) this.main.focus();
   }
 
@@ -590,6 +608,7 @@ class BookView {
   // --- word counts and status ----------------------------------------------------
 
   paneChanged(pane) {
+    this.claude?.refreshContext();
     clearTimeout(this.countTimer);
     this.countTimer = setTimeout(() => {
       this.liveWords(pane);
@@ -649,6 +668,47 @@ class BookView {
         // status is a convenience; leave the last value
       }
     }, now ? 0 : 1500);
+  }
+
+  // --- Claude -------------------------------------------------------------------
+
+  toggleClaude(show = !this.claude.visible) {
+    if (show) this.claude.show();
+    else this.claude.hide();
+    this.claudeBtn.setAttribute('aria-pressed', String(show));
+    writeStored('claude', show ? 'open' : 'closed');
+  }
+
+  // What the panel can attach to a prompt: the open file, the file beside
+  // it, and the selected text in either.
+  claudeContext() {
+    const describe = (path) => ({ path, label: fileLabel(path) });
+    const sideShown = this.side.file && !this.side.el.hidden;
+    const focused = [this.main, this.side].find((p) => p.el.contains(document.activeElement));
+    const withSelection = [focused, this.main, sideShown ? this.side : null].find((p) => p?.file && p.selection.trim());
+    return {
+      file: this.main.file ? describe(this.main.file.path) : null,
+      companion: sideShown ? describe(this.side.file.path) : null,
+      selection: withSelection ? { path: withSelection.file.path, text: withSelection.selection } : null,
+      mode: this.tree && availableModes(this.tree).length > 1 ? this.mode : '',
+      modes: this.tree ? availableModes(this.tree).map((m) => ({ value: m, label: modeLabel(m) })) : [],
+    };
+  }
+
+  // Puts the whole book back as it was before a run (as a new commit).
+  async undoClaudeRun(before) {
+    const ok = await confirmDialog({
+      title: 'Undo this run?',
+      message: 'This puts every file in the book back as it was before Claude started. Anything since then, including your own edits, is committed first, so it stays in History.',
+      okLabel: 'Undo run',
+    });
+    if (!ok || !(await this.save())) return;
+    try {
+      await this.rewriting(() => api.gitRestoreBook(this.id, before));
+      toast('The book is back as it was before the run');
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
   }
 
   // --- drafts (branches) ---------------------------------------------------------
@@ -924,6 +984,17 @@ class BookView {
   }
 }
 
+// "Scene: Dorgal arrives", "Plot: Opening", "Codex: Tor" for a book path.
+function fileLabel(path) {
+  const [top] = path.split('/');
+  const base = path.split('/').pop();
+  if (base === '_chapter.md') return 'Chapter summary';
+  const title = base.replace(/\.md$/, '').replace(/^\d+-/, '').replace(/\.[a-z0-9-]+$/, '').replace(/-/g, ' ');
+  const name = title.charAt(0).toUpperCase() + title.slice(1);
+  const kind = { manuscript: 'Scene', outline: 'Plot', codex: 'Codex' }[top];
+  return kind ? `${kind}: ${name}` : name;
+}
+
 // Per-browser conveniences (like the chosen mode); never required to work.
 function readStored(key) {
   try {
@@ -999,6 +1070,7 @@ installShortcuts({
   companion: () => (bookView && !bookView.companionBtn.hidden ? (bookView.toggleCompanion(), true) : false),
   cycleView: () => (bookView ? bookView.cycleView() : false),
   history: () => (bookView ? (bookView.openHistory(), true) : false),
+  claude: () => (bookView ? (bookView.toggleClaude(), true) : false),
 });
 document.getElementById('help-btn')?.addEventListener('click', () => showShortcutHelp());
 
