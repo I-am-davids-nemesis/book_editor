@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { createApp } from '../server/app.js';
-import { buildPrompt, ClaudeService, compact } from '../server/claude.js';
+import { agentEnv, buildPrompt, ClaudeService, compact } from '../server/claude.js';
 import { saveConfig } from '../server/config.js';
 import { gitBook, gitIn, SAMPLE_BOOK, tempDir } from './helpers.js';
 
@@ -227,10 +227,17 @@ test('errors from the agent show in the panel and the book is still committed', 
   const { runId } = await claude.start(root, { prompt: 'Note it' });
   const events = await collect(claude.run(runId, root));
   assert.deepEqual(events.filter((e) => e.type === 'error').map((e) => e.message), [
-    'Claude Code could not sign in. Run `claude` in a terminal to log in (and if ANTHROPIC_API_KEY is set where the editor runs, check it is valid), then try again.',
+    'Claude Code could not sign in. Run `claude` in a terminal to log in, then try again. (With BOOK_EDITOR_API_KEY=1, check that ANTHROPIC_API_KEY is valid.)',
   ], 'the same failure is reported once');
   assert.equal(events.at(-1).ok, false);
   assert.equal(gitIn(root, 'log', '-1', '--format=%s').trim(), 'Claude: Note it');
+});
+
+test('runs use the Claude Code login unless an API key is asked for', () => {
+  const env = agentEnv({ PATH: '/bin', ANTHROPIC_API_KEY: 'sk-stale' });
+  assert.equal(env.PATH, '/bin');
+  assert.equal('ANTHROPIC_API_KEY' in env, false);
+  assert.equal(agentEnv({ ANTHROPIC_API_KEY: 'sk-real', BOOK_EDITOR_API_KEY: '1' }).ANTHROPIC_API_KEY, 'sk-real');
 });
 
 test('prompt building and transcript compaction', () => {

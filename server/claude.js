@@ -26,6 +26,15 @@ const SYSTEM_APPEND = `You are helping a writer with a novel, from a panel insid
 The book is plain Markdown in git: manuscript/ holds scenes (pure prose, no front matter), outline/ mirrors it with one plot file per scene, codex/ holds characters, locations and notes. AGENTS.md has the book's conventions.
 Files you change reload in the writer's open panes, and the editor commits your changes when you finish. Change only files inside this book. Keep answers in the panel short; the work belongs in the files.`;
 
+// Runs use your Claude Code login. An ANTHROPIC_API_KEY in the shell that
+// started the editor would take precedence over it (and is often a stale key
+// meant for something else), so it is dropped unless BOOK_EDITOR_API_KEY=1.
+export function agentEnv(env = process.env) {
+  const out = { ...env, CLAUDE_AGENT_SDK_CLIENT_APP: 'book-editor/0.1.0' };
+  if (env.BOOK_EDITOR_API_KEY !== '1') delete out.ANTHROPIC_API_KEY;
+  return out;
+}
+
 // The SDK is loaded on first use, so the server starts (and tests run)
 // without it.
 async function* sdkQuery(args) {
@@ -148,6 +157,7 @@ export class ClaudeService {
         prompt: buildPrompt(run.prompt, run.context),
         options: {
           cwd: root,
+          env: agentEnv(),
           // Project settings only: the book's CLAUDE.md / AGENTS.md apply, and
           // the user's own allow rules can't widen what a run may do.
           settingSources: ['project'],
@@ -480,7 +490,7 @@ function resultText(content) {
 
 function assistantError(code) {
   const messages = {
-    authentication_failed: 'Claude Code could not sign in. Run `claude` in a terminal to log in (and if ANTHROPIC_API_KEY is set where the editor runs, check it is valid), then try again.',
+    authentication_failed: 'Claude Code could not sign in. Run `claude` in a terminal to log in, then try again. (With BOOK_EDITOR_API_KEY=1, check that ANTHROPIC_API_KEY is valid.)',
     billing_error: 'Claude reported a billing problem with your account.',
     rate_limit: 'Claude is rate limited right now; try again in a little while.',
     overloaded: 'Claude is overloaded right now; try again in a little while.',

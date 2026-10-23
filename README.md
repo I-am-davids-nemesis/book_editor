@@ -152,7 +152,7 @@ Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘
 - **"Can't reach the editor server."** The server stopped. Run `npm start` again. Your typing is still in the page and saves once the server is back.
 - **"Port 4321 is in use."** Another copy is running, or something else uses the port. Stop it, or use `PORT=5000 npm start`.
 - **"Auto-commit failed"** in the status bar. Hover over it to see git's message. Usually git's name or email isn't set (see Setup).
-- **Claude says it could not sign in.** Run `claude` in a terminal and log in. If `ANTHROPIC_API_KEY` is set in the shell that started the editor, Claude Code uses it instead of your login, so check that it's valid, or unset it.
+- **Claude says it could not sign in.** Run `claude` in a terminal and log in. The editor ignores any `ANTHROPIC_API_KEY` in your shell, so a stale key can't get in the way of your login. To bill an API key instead, start the editor with `BOOK_EDITOR_API_KEY=1 npm start`.
 - **Push fails asking for a password.** Set up an SSH key, or a credential helper for HTTPS remotes.
 
 ## Test
