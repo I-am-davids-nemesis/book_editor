@@ -5,7 +5,7 @@ import { handoffButtons, loadVisualStyle, referenceItems } from './handoff.js';
 import { codexEntries } from './tree.js';
 import { h, toast } from './ui.js';
 import {
-  assembleShot, entryLook, fixedTraits, mentionedEntries, pickReferences, SHOT_SIZES, shotImages, variantsIn, VIEW_LABELS,
+  assembleShot, entryLook, fixedTraits, lookOf, mentionedEntries, pickReferences, SHOT_SIZES, shotImages, variantsIn, VIEW_LABELS,
 } from './worldmodel.js';
 
 // A moment this long reads as a scene, not a picture: suggest a brief.
@@ -160,14 +160,17 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry, onCan
       ...left.map((e) => h('option', { value: e.path }, e.title)));
     addPersonEl.disabled = !left.length;
 
-    // Entries the prompt can say nothing about yet (once their text is in).
-    const thin = [...shot.characters.map((c) => c.path), ...(shot.location ? [shot.location] : [])]
-      .filter((p) => texts.has(p) && texts.get(p) !== '' && !entryLook(texts.get(p)) && !fixedTraits(texts.get(p)).length)
-      .map((p) => byPath.get(p).title);
-    thinEl.hidden = !thin.length;
-    thinEl.textContent = thin.length
-      ? `${thin.join(', ')} ${thin.length === 1 ? 'has' : 'have'} no description in the codex yet, so the prompt leaves ${thin.length === 1 ? 'it' : 'them'} out. Gather one from the entry’s Claude ▾ menu.`
-      : '';
+    // Entries the prompt can say nothing about yet (once their text is in),
+    // and ones whose long Description it had to cut.
+    const inShot = [...shot.characters.map((c) => c.path), ...(shot.location ? [shot.location] : [])].filter((p) => texts.get(p));
+    const thin = inShot.filter((p) => !entryLook(texts.get(p)) && !fixedTraits(texts.get(p)).length).map((p) => byPath.get(p).title);
+    const cut = inShot.filter((p) => lookOf(texts.get(p)).cut).map((p) => byPath.get(p).title);
+    const list = (names) => names.join(', ');
+    thinEl.hidden = !thin.length && !cut.length;
+    thinEl.textContent = [
+      thin.length ? `${list(thin)} ${thin.length === 1 ? 'has' : 'have'} no description in the codex yet, so the prompt leaves ${thin.length === 1 ? 'it' : 'them'} out. Gather one from the entry’s Claude ▾ menu, or describe ${thin.length === 1 ? 'it' : 'them'} in the brief.` : '',
+      cut.length ? `${list(cut)}’s description is long, so the prompt uses only its start. Give ${cut.length === 1 ? 'the entry' : 'each'} a short look with Claude ▾ → Draft a short look.` : '',
+    ].filter(Boolean).join(' ');
 
     // Characters and places the moment names that aren't in the shot yet.
     const named = mentionedEntries(`${shot.moment.text}\n${shot.brief}`, [...characters, ...locations])

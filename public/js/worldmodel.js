@@ -113,19 +113,37 @@ export function handoffPrompt({ kind, text, styleText = '', refs = [] }) {
 
 export const SHOT_SIZES = { wide: 'Wide shot', medium: 'Medium shot', close: 'Close-up' };
 
-// How an entry looks, for a picture with others in it: its Description's prose
-// (not the image prompt, which stages its own scene), plus the chosen
-// variant's subsection; or the entry's opening lines if it has no Description.
-export function entryLook(text, variant = '') {
+export const LOOK = 'Look';
+const LOOK_MAX = 700;
+
+// How an entry looks, for a picture with others in it: { text, cut }.
+// The "### Look" subsection of its Description (a few lines, appearance only)
+// if it has one; otherwise the Description's prose, cut after about LOOK_MAX
+// characters at a sentence (`cut` says so). Plus the chosen variant's
+// subsection. '' without a Description: an entry's opening lines are a pitch
+// or notes, not a look. The image prompt isn't used; it stages its own scene.
+export function lookOf(text, variant = '') {
   const desc = sectionBody(text, 2, DESCRIPTION);
-  let base = desc === null ? '' : prose(desc.split(/^#{3,6}\s/m)[0]);
-  if (!base) {
-    const intro = String(text).replace(/^\s*#\s.*$/m, '').split(/^##\s/m)[0];
-    base = prose(intro);
+  let base = '';
+  let cut = false;
+  if (desc !== null) {
+    const look = sectionBody(desc, 3, LOOK);
+    base = prose(look ?? desc.split(/^#{3,6}\s/m)[0]).replace(/\n\n/g, ' ');
+    if (look === null && base.length > LOOK_MAX) {
+      let kept = '';
+      for (const sentence of base.split(/(?<=[.!?][”"’)]?)\s+/)) {
+        if (kept && kept.length + sentence.length + 1 > LOOK_MAX) break;
+        kept = kept ? `${kept} ${sentence}` : sentence;
+      }
+      cut = kept.length < base.length;
+      base = kept;
+    }
   }
   const variantText = variant ? prose(sectionBody(desc ?? text, 3, `Variant: ${variant}`) ?? '') : '';
-  return [base, variantText].filter(Boolean).join(' ').replace(/\n\n/g, ' ');
+  return { text: [base, variantText].filter(Boolean).join(' ').replace(/\n\n/g, ' '), cut };
 }
+
+export const entryLook = (text, variant = '') => lookOf(text, variant).text;
 
 // The entries a shot shows: its people, then its setting.
 //   shot: { location, characters: [{ path, variant }] }
@@ -201,13 +219,21 @@ export function assembleShot({ shot, entries, styleText = '', refs = [] }) {
     const line = describe(c, false);
     if (line) parts.push(line);
   }
+  // With several people, generators tend to blend them, or give one person's
+  // reference face to another: name everyone, and tie each image to one.
+  const people = shot.characters.map((c) => entries.get(c.path)?.title).filter(Boolean);
+  const crowd = people.length > 1;
+  if (crowd) {
+    parts.push(`There are ${people.length} distinct people in the picture: ${listOf(people)}. Each keeps their own face, hair and build as described; don't make them look alike.`);
+  }
 
   if (refs.length) {
     parts.push([
       'Reference images, attached in this order. Keep each person and place consistent with their images:',
       ...refs.map(({ img, entry }, i) => {
         const e = entries.get(entry);
-        return `Image ${i + 1}: ${describeRef(img, e?.kind, e?.title)}.`;
+        const only = crowd && e?.kind === 'character' ? ` Use it only for ${e.title}.` : '';
+        return `Image ${i + 1}: ${describeRef(img, e?.kind, e?.title)}.${only}`;
       }),
     ].join('\n'));
   }
@@ -226,12 +252,14 @@ export function mentionedEntries(text, entries) {
   return entries.filter((e) => has(e.title) || (e.title.includes(' ') && has(e.title.split(' ')[0]) && e.kind === 'character')).map((e) => e.path);
 }
 
+const listOf = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '');
+
 // A short name for a shot: "Tor and Davie at the Washing House", or the
 // prompt's start when it names no one.
 export function shotName(shot, byPath, fallback = 'Shot') {
   const names = (shot?.characters ?? []).map((c) => byPath.get(c.path)?.title).filter(Boolean);
   const place = shot?.location ? byPath.get(shot.location)?.title : null;
-  const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+  const who = listOf(names);
   if (who && place) return `${who} at ${place}`;
   return who || place || fallback;
 }

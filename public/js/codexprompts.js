@@ -15,9 +15,17 @@ export const IMAGE_TOOLS = [
   { label: 'Gemini', url: 'https://gemini.google.com/app' },
 ];
 
+// What a "### Look" says: the entry's appearance in a few lines, for prompts
+// that put it in a scene with others (the Stage dialog).
+const LOOK_FORMAT = 'Two to four sentences, under 600 characters, on appearance only, as a picture of any scene would need it: for a person, build and height next to others, face, hair, and the clothing they usually wear; for a place, size, materials, fixtures and light. No setting, action, mood, voice or habits, and no names.';
+
 const SECTION_FORMAT = `## ${DESCRIPTION}
 
 <One to three paragraphs of prose: everything established about how they look, sound and move (for a place: layout, materials, light, sounds, smells). Only what the sources support.>
+
+### Look
+
+<${LOOK_FORMAT}>
 
 ### ${IMAGE_PROMPT}
 
@@ -62,6 +70,17 @@ export function fixedTraitsPrompt(entry) {
 Don't change anything else in ${entry.path}, and nothing in manuscript/ or outline/.`;
 }
 
+// Claude writes the "### Look" of an entry's Description: the short
+// appearance-only text the Stage dialog puts in prompts.
+export function lookPrompt(entry) {
+  return `Draft a short look for “${entry.title}” (${entry.path}), for image prompts that place ${entry.title} in a scene with others.
+
+1. Read ${entry.path}: its "## ${DESCRIPTION}" section and its "## ${FIXED_TRAITS}", if any.
+2. Write a "### Look" subsection inside "## ${DESCRIPTION}": ${LOOK_FORMAT} Use only what the entry already says; where it gives the person several outfits or the place several states, use the usual one. Put it right after the Description's prose, before any other "###" subsection, replacing an existing "### Look".
+
+Don't change anything else in ${entry.path}, and nothing in manuscript/ or outline/. In the panel, show the look you wrote.`;
+}
+
 // Claude looks at lookbook images and folds what they settle into each
 // linked entry's Description.
 export function refinePrompt(entries, images) {
@@ -80,7 +99,7 @@ For each entry:
 ${SECTION_FORMAT}
 
 2. Add the concrete details the image settles that the text leaves open (colors, materials, proportions, wear, light, expression) to the description prose. Keep the writer's facts: where the image contradicts the text, the manuscript or the entry's "## ${FIXED_TRAITS}", don't change the text. Add the conflict to "### Open questions" instead, naming the image. Never edit "## ${FIXED_TRAITS}".
-3. Update "### ${IMAGE_PROMPT}" so it would produce this look again.
+3. Update "### ${IMAGE_PROMPT}" so it would produce this look again, and "### Look" if the entry has one.
 4. Add the image to the section as a source: "- Image: lookbook/<file>".
 
 Don't change anything in manuscript/ or outline/. In the panel, list what you added and the conflicts you found, briefly.`;

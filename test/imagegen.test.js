@@ -324,8 +324,13 @@ test('Start can run a start script instead, and reports one that fails', async (
   setTimeout(() => { state.down = false; }, 50);
   const result = await new ComfyUIProvider({ url, startScript: ok, logFile, platform: 'linux', WebSocket: null }).start({ pollMs: 10 });
   assert.equal(result.ok, true);
-  await new Promise((r) => setTimeout(r, 100)); // the script's echo can land after ComfyUI answers
-  assert.match(await fs.readFile(logFile, 'utf8'), /starting ComfyUI/);
+  // The script's echo can land after ComfyUI answers, especially under load.
+  let log = '';
+  for (let i = 0; i < 40 && !/starting ComfyUI/.test(log); i += 1) {
+    await new Promise((r) => setTimeout(r, 50));
+    log = await fs.readFile(logFile, 'utf8');
+  }
+  assert.match(log, /starting ComfyUI/);
 
   state.down = true;
   const bad = await script('bad.sh', 'echo "ModuleNotFoundError: No module named torch" >&2\nexit 3');

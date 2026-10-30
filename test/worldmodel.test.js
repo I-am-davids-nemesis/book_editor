@@ -6,7 +6,7 @@ import { addVisualStyle } from '../server/codex.js';
 import { prepareHandoff } from '../server/handoff.js';
 import { briefPrompt } from '../public/js/codexprompts.js';
 import {
-  assembleShot, entryLook, fixedTraits, handoffPrompt, mentionedEntries, missingViews, pickReferences, rankImages,
+  assembleShot, entryLook, fixedTraits, handoffPrompt, lookOf, mentionedEntries, missingViews, pickReferences, rankImages,
   shotImages, variantsIn, visualStyle, VISUAL_STYLE,
 } from '../public/js/worldmodel.js';
 import { listFiles, tempDir, writeFiles } from './helpers.js';
@@ -157,7 +157,7 @@ A cobbled yard around a stone well, with long wooden troughs under a lean-to.
 - Round stone well with an iron winch
 `;
 
-const dorgal = '# Dorgal\n\nThe overseer, a heavy man in a leather apron.\n';
+const dorgal = '# Dorgal\n\nThe overseer.\n\n## Description\n\nThe overseer, a heavy man in a leather apron.\n';
 
 const entries = new Map([
   ['codex/characters/tor.md', { title: 'Tor', kind: 'character', text: tor }],
@@ -179,6 +179,21 @@ test('an entry’s look is its description prose, plus a chosen variant', () => 
   assert.equal(entryLook(tor), 'Tall and stooped.');
   assert.equal(entryLook(tor, 'winter coat'), 'Tall and stooped. A grey felt coat to the knee.');
   assert.equal(entryLook(dorgal), 'The overseer, a heavy man in a leather apron.');
+});
+
+test('an entry without a Description has no look: its opening lines are a pitch or notes', () => {
+  assert.equal(entryLook('# Wash house\n\n- **What it pressures:** a low room. (invented)\n\nWhere Tor tests things.\n'), '');
+});
+
+test('a "### Look" wins over the Description, and a long Description is cut at a sentence', () => {
+  const looked = '# Tor\n\n## Description\n\nPages about him.\n\n### Look\n\nSmall, in a brown tunic.\n\n### Image prompt\n\nTor in a workshop.\n';
+  assert.deepEqual(lookOf(looked), { text: 'Small, in a brown tunic.', cut: false });
+  const sentence = 'He is small and quick and always tidy at the start of the day. ';
+  const long = `# Tor\n\n## Description\n\n${sentence.repeat(8)}\n\n${sentence.repeat(8)}\n`;
+  const { text, cut } = lookOf(long);
+  assert.equal(cut, true);
+  assert.ok(text.length <= 700 && text.endsWith('day.'), text);
+  assert.equal(lookOf(tor).cut, false);
 });
 
 test('a shot’s references take each person’s best image first, then the setting’s', () => {
@@ -212,9 +227,11 @@ Tor (winter coat): Tall and stooped. A grey felt coat to the knee. Must match ex
 
 Dorgal: The overseer, a heavy man in a leather apron.
 
+There are 2 distinct people in the picture: Tor and Dorgal. Each keeps their own face, hair and build as described; don't make them look alike.
+
 Reference images, attached in this order. Keep each person and place consistent with their images:
-Image 1: Tor, full length (winter coat).
-Image 2: Dorgal’s face.
+Image 1: Tor, full length (winter coat). Use it only for Tor.
+Image 2: Dorgal’s face. Use it only for Dorgal.
 Image 3: Washing House, establishing view.
 
 Style: Medium: Gouache illustration. Light: Low natural light, never harsh.

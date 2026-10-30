@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fixedTraitsPrompt, gatherPrompt, imagePromptFrom, manuscriptPrompt, refinePrompt } from '../public/js/codexprompts.js';
+import {
+  fixedTraitsPrompt, gatherPrompt, imagePromptFrom, lookPrompt, manuscriptPrompt, refinePrompt,
+} from '../public/js/codexprompts.js';
 
 const tor = { path: 'codex/characters/tor.md', title: 'Tor', kind: 'character' };
 
@@ -53,4 +55,14 @@ test('prompts name the files and keep Claude out of the manuscript until asked',
   assert.match(traits, /If the entry already has a "## Fixed traits" section with bullets in it, don't change it/);
   assert.match(traits, /Face, build/);
   assert.match(fixedTraitsPrompt({ ...tor, kind: 'location' }), /Layout, materials/);
+});
+
+test('the short look is appearance only, inside the Description', () => {
+  const tor = { title: 'Tor', path: 'codex/characters/tor.md', kind: 'character' };
+  assert.match(gatherPrompt(tor), /### Look\n\n<Two to four sentences/);
+  const look = lookPrompt(tor);
+  assert.match(look, /"### Look" subsection inside "## Description"/);
+  assert.match(look, /No setting, action, mood, voice or habits/);
+  assert.match(look, /usual one/);
+  assert.match(look, /nothing in manuscript\/ or outline\//);
 });

@@ -6,7 +6,7 @@ import { connectEvents } from './events.js';
 import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
-import { fixedTraitsPrompt, gatherPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
+import { fixedTraitsPrompt, gatherPrompt, lookPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
 import { entryStrip, LookbookView, uploadImages } from './lookbook.js';
 import { stageDialog } from './stage.js';
 import { mentionedEntries, VISUAL_STYLE } from './worldmodel.js';
@@ -500,6 +500,7 @@ class BookView {
       claude: {
         gather: () => this.askClaude(gatherPrompt(entry)),
         traits: () => this.askClaude(fixedTraitsPrompt(entry)),
+        look: () => this.askClaude(lookPrompt(entry)),
         refine: (images) => this.askClaude(refinePrompt([entry], images)),
         manuscript: () => this.askClaude(manuscriptPrompt(entry)),
       },

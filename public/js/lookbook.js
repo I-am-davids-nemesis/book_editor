@@ -107,7 +107,7 @@ const viewLabel = (img) => [VIEW_LABELS[img.view] ?? 'Reference', img.variant].f
 // The bar above an open codex entry: its images, references first (and a way
 // to add more), what its model sheet still lacks, the image prompt for outside
 // generators, and Claude's description actions.
-//   entry: { path, title, kind }   claude: { gather(), refine(images), manuscript(), traits() }
+//   entry: { path, title, kind }   claude: { gather(), refine(images), manuscript(), traits(), look() }
 //   onStage(): opens the Stage dialog with this entry in the shot
 export function entryStrip({ bookId, tree, entry, getText, onAdd, onStage, claude }) {
   const images = rankImages(imagesByEntry(tree).get(entry.path) ?? [], entry.kind);
@@ -153,6 +153,7 @@ export function entryStrip({ bookId, tree, entry, getText, onAdd, onStage, claud
     const traits = fixedTraits(text).length;
     showMenu(e.currentTarget, [
       { label: described ? 'Gather the description again from the manuscript' : 'Gather a description from the manuscript', onclick: () => claude.gather() },
+      { label: /^###\s+Look\s*$/m.test(text) ? 'Redraft the short look for staged shots' : 'Draft a short look for staged shots', disabled: !described, onclick: () => claude.look() },
       { label: traits ? 'Suggest more fixed traits' : 'Draft fixed traits from the description', disabled: !described, onclick: () => claude.traits() },
       { label: images.length ? `Refine the description from ${images.length === 1 ? 'its image' : `its ${images.length} images`}` : 'Refine from images (add an image first)', disabled: !images.length, onclick: () => claude.refine(images) },
       { label: 'Suggest manuscript edits from the description', disabled: !described, onclick: () => claude.manuscript() },
