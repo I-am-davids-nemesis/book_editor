@@ -113,7 +113,7 @@ class BookView {
         upload: (files, of) => this.uploadImages(files, of),
         refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path }),
         visualStyle: () => this.openVisualStyle(),
-        stage: () => this.stage(),
+        stage: (initial) => this.stage(initial),
       },
     });
     this.el.append(this.lookbook.el);
@@ -514,6 +514,10 @@ class BookView {
       tree: this.tree,
       initial,
       readEntry: async (path) => (this.main.file?.path === path ? this.main.content : (await api.readFile(this.id, path)).content),
+      onCandidates: () => {
+        this.lookbook.setMode('candidates');
+        this.openLookbook();
+      },
     });
   }
 

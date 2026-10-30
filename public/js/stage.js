@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { briefPrompt } from './codexprompts.js';
+import { generateRow } from './generate.js';
 import { handoffButtons, loadVisualStyle, referenceItems } from './handoff.js';
 import { codexEntries } from './tree.js';
 import { h, toast } from './ui.js';
@@ -15,9 +16,12 @@ const DEFAULT_REFS = 6;
 // The Stage dialog: choose who and where, the moment and the framing; the
 // editor builds the prompt from the codex (visual style, each entry's look
 // and fixed traits) and picks reference images, numbered in the prompt.
-//   initial: { characters: [path], location: path|null, moment: { text, source } }
+//   initial: { characters: [path or { path, variant }], location: path|null,
+//              moment: { text, source }, brief, framing } — a whole saved shot
+//              (Stage again) or just who and what
 //   readEntry(path) → the entry's Markdown (the open editor's, if it's open)
-export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
+//   onCandidates(): show generated images in the Lookbook
+export async function stageDialog({ bookId, tree, initial = {}, readEntry, onCandidates = () => {} }) {
   const all = codexEntries(tree);
   const byPath = new Map(all.map((e) => [e.path, e]));
   const characters = all.filter((e) => e.kind === 'character');
@@ -26,11 +30,13 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
 
   const shot = {
     location: initial.location ?? null,
-    characters: (initial.characters ?? []).filter((p) => byPath.has(p)).map((path) => ({ path, variant: '' })),
+    characters: (initial.characters ?? []).map((c) => (typeof c === 'string' ? { path: c, variant: '' } : { path: c?.path, variant: c?.variant ?? '' }))
+      .filter((c) => byPath.has(c.path)),
     moment: { text: initial.moment?.text ?? '', source: initial.moment?.source ?? '' },
-    brief: '',
-    framing: { shot: '', time: '', notes: '' },
+    brief: initial.brief ?? '',
+    framing: { shot: '', time: '', notes: '', ...initial.framing },
   };
+  if (shot.location && !byPath.has(shot.location)) shot.location = null;
   let maxRefs = DEFAULT_REFS;
   const overrides = new Map(); // image path → true/false, where the writer ticked or unticked
   let edited = false;
@@ -70,22 +76,22 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
   momentEl.addEventListener('input', () => { shot.moment.text = momentEl.value; update(); });
   const momentHint = h('p', { class: 'field-hint' });
 
-  const briefEl = h('textarea', { rows: 5, placeholder: 'Optional: what the picture shows, in a few sentences. Used instead of the moment when it’s filled in.' });
+  const briefEl = h('textarea', { rows: 5, placeholder: 'Optional: what the picture shows, in a few sentences. Used instead of the moment when it’s filled in.' }, shot.brief);
   briefEl.addEventListener('input', () => { shot.brief = briefEl.value; update(); });
   const briefBtn = h('button', { type: 'button', onclick: () => writeBrief() }, 'Write it with Claude');
 
   const sizeEl = h('select', { 'aria-label': 'Shot size' },
     h('option', { value: '' }, 'Any size'),
-    Object.entries(SHOT_SIZES).map(([v, label]) => h('option', { value: v }, label)));
+    Object.entries(SHOT_SIZES).map(([v, label]) => h('option', { value: v, selected: v === shot.framing.shot }, label)));
   sizeEl.addEventListener('change', () => { shot.framing.shot = sizeEl.value; update(); });
-  const timeEl = h('input', { type: 'text', placeholder: 'Time of day, e.g. dawn', 'aria-label': 'Time of day' });
+  const timeEl = h('input', { type: 'text', value: shot.framing.time, placeholder: 'Time of day, e.g. dawn', 'aria-label': 'Time of day' });
   timeEl.addEventListener('input', () => { shot.framing.time = timeEl.value.trim(); update(); });
-  const notesEl = h('input', { type: 'text', placeholder: 'Camera notes, e.g. low angle, from behind Tor', 'aria-label': 'Camera notes' });
+  const notesEl = h('input', { type: 'text', value: shot.framing.notes, placeholder: 'Camera notes, e.g. low angle, from behind Tor', 'aria-label': 'Camera notes' });
   notesEl.addEventListener('input', () => { shot.framing.notes = notesEl.value.trim(); update(); });
 
   // --- middle: the prompt ---
   const promptEl = h('textarea', { class: 'handoff-prompt', spellcheck: 'true', 'aria-label': 'Prompt' });
-  promptEl.addEventListener('input', () => { edited = true; promptHint.hidden = false; });
+  promptEl.addEventListener('input', () => { edited = true; promptHint.hidden = false; gen.refresh(); });
   const promptHint = h('p', { class: 'field-hint', hidden: true },
     'You’ve edited the prompt, so changes on the left no longer rebuild it. ',
     h('button', { type: 'button', class: 'link', onclick: () => { edited = false; promptHint.hidden = true; update(); } }, 'Rebuild it'));
@@ -96,6 +102,22 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
   const maxEl = h('select', { 'aria-label': 'Most references to send' },
     REF_LIMITS.map((n) => h('option', { value: String(n), selected: n === maxRefs }, `Up to ${n}`)));
   maxEl.addEventListener('change', () => { maxRefs = Number(maxEl.value); update(); });
+
+  // --- generating here ---
+  let closeDialog = () => {};
+  const gen = generateRow({
+    bookId,
+    getJob: () => ({ prompt: promptEl.value, refs: references().chosen.map((c) => c.img.path), shot: structuredClone(shot) }),
+    // Send no more references than the model takes.
+    onModel: (model) => {
+      if (maxRefs <= model.maxRefs) return;
+      maxRefs = model.maxRefs;
+      if (![...maxEl.options].some((o) => Number(o.value) === maxRefs)) maxEl.prepend(h('option', { value: String(maxRefs) }, `Up to ${maxRefs}`));
+      maxEl.value = String(maxRefs);
+      update();
+    },
+    onCandidates: () => { closeDialog(); onCandidates(); },
+  });
 
   // The references in the order they'll be attached, and the rest.
   const references = () => {
@@ -189,6 +211,7 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
       : shot.moment.source ? `From ${shot.moment.source}.` : '';
     momentHint.classList.toggle('warning', long);
     briefBtn.disabled = !shot.moment.text.trim();
+    gen.refresh();
   }
 
   function noteFor({ img, entry }) {
@@ -230,14 +253,16 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry }) {
             field('Brief', briefEl, h('div', { class: 'stage-row' }, briefBtn,
               h('span', { class: 'field-hint' }, 'Claude reads the scene and says what the picture shows.'))),
             field('Framing', h('div', { class: 'stage-row' }, sizeEl, timeEl), notesEl)),
-          h('div', { class: 'stage-col stage-prompt' }, field('Prompt', promptEl, promptHint)),
+          h('div', { class: 'stage-col stage-prompt' }, field('Prompt', promptEl, promptHint), field('Generate here', gen.el)),
           h('div', { class: 'stage-col stage-refs' }, field('Reference images', maxEl, refsEl, refsHint))),
         h('div', { class: 'dialog-buttons' },
           buttons.start,
           h('span', { class: 'spacer' }),
           buttons.end,
           h('button', { type: 'submit' }, 'Close'))));
+    closeDialog = () => dialog.close();
     dialog.addEventListener('close', () => {
+      gen.close();
       dialog.remove();
       resolve();
     });

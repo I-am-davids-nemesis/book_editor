@@ -7,6 +7,7 @@ import { AutoCommitter } from './autocommit.js';
 import {
   createBook, forgetBook, getBook, getBookRoot, libraryExists, listBooks, registerBook,
 } from './books.js';
+import { CANDIDATES, discardCandidates, keepCandidate } from './candidates.js';
 import { ClaudeService } from './claude.js';
 import { addCodexEntry, addVisualStyle, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
@@ -17,6 +18,8 @@ import { prepareHandoff } from './handoff.js';
 import {
   commitNamed, compare, createBranch, fileDiff, graph, imageAt, push, restoreBook, restoreFile, status, switchBranch,
 } from './history.js';
+import { providersFrom } from './imagegen/index.js';
+import { ImageJobs, MAX_IMAGES, SIZES } from './imagegen/jobs.js';
 import { buildImportMap } from './importmap.js';
 import { addImage, deleteImage, IMAGE_TYPES, isImagePath, updateImage } from './lookbook.js';
 import { resolveInBook } from './paths.js';
@@ -83,6 +86,8 @@ export function createApp({
   autoCommitter = new AutoCommitter(),
   claude = new ClaudeService({ onCommitted: (root) => autoCommitter.committed(root) }),
   token = crypto.randomBytes(24).toString('hex'),
+  imageJobs = new ImageJobs(),
+  imageProviders = providersFrom,
 } = {}) {
   const app = express();
   app.locals.autoCommitter = autoCommitter;
@@ -174,8 +179,9 @@ export function createApp({
     res.type(IMAGE_TYPES[path.extname(abs).slice(1).toLowerCase()]);
     // ?rev=<commit>: the image as it was then (History).
     if (req.query.rev) return res.send(await imageAt(root, { rev: req.query.rev, path: rel }));
-    res.sendFile(abs, { dotfiles: 'deny' }, (err) => {
-      if (err && !res.headersSent) res.status(err.status === 404 || err.code === 'ENOENT' ? 404 : 500).json({ error: `No such image: ${rel}` });
+    // Candidates live in a dot folder; nothing else hidden is served.
+    res.sendFile(abs, { dotfiles: rel.startsWith(`${CANDIDATES}/`) ? 'allow' : 'deny' }, (err) => {
+      if (err && !res.headersSent) res.status([403, 404].includes(err.status) || err.code === 'ENOENT' ? 404 : 500).json({ error: `No such image: ${rel}` });
     });
   });
 
@@ -323,6 +329,77 @@ export function createApp({
   api.post('/books/:id/handoff', requireToken(token), async (req, res) => {
     res.json(await prepareHandoff(await bookRoot(req), req.body ?? {}));
   });
+
+  // --- generating images ---
+  // These talk to a program on this machine and write files, so they need the
+  // page's token too.
+  const providerOf = (req, id) => {
+    const provider = imageProviders(req.config).find((p) => p.id === id);
+    if (!provider) throw new HttpError(400, `No such image generator: ${id}`);
+    return provider;
+  };
+
+  api.get('/imagegen/providers', requireToken(token), async (req, res) => {
+    const providers = await Promise.all(imageProviders(req.config).map(async (p) => ({
+      id: p.id, label: p.label, limits: p.limits, canStart: Boolean(p.canStart), canFree: Boolean(p.free), ...(await p.check()),
+    })));
+    res.json({ providers, sizes: SIZES, maxImages: MAX_IMAGES });
+  });
+
+  // Opens the generator's app (ComfyUI) and waits for it.
+  api.post('/imagegen/providers/:provider/start', requireToken(token), async (req, res) => {
+    const provider = providerOf(req, req.params.provider);
+    if (!provider.start) throw new HttpError(400, `${provider.label} can’t be started from here`);
+    res.json({ id: provider.id, label: provider.label, limits: provider.limits, canStart: true, canFree: Boolean(provider.free), ...(await provider.start()) });
+  });
+
+  // Unloads the generator's model now, to free memory.
+  api.post('/imagegen/providers/:provider/free', requireToken(token), async (req, res) => {
+    const provider = providerOf(req, req.params.provider);
+    res.json({ freed: provider.free ? await provider.free() : false });
+  });
+
+  const jobRoutes = express.Router({ mergeParams: true });
+  jobRoutes.use(requireToken(token));
+
+  jobRoutes.get('/', async (req, res) => {
+    res.json(imageJobs.list(await bookRoot(req)));
+  });
+
+  jobRoutes.post('/', async (req, res) => {
+    const job = await imageJobs.start(await bookRoot(req), providerOf(req, req.body?.provider), req.body ?? {});
+    res.status(201).json(job.summary);
+  });
+
+  jobRoutes.get('/:job/events', async (req, res) => {
+    const job = imageJobs.get(req.params.job, await bookRoot(req));
+    const after = Number(req.headers['last-event-id'] ?? req.query.after ?? -1);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+    });
+    res.write('retry: 2000\n\n');
+    const unsubscribe = job.subscribe((e) => {
+      if (e) res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
+      else res.write('event: end\ndata: {}\n\n');
+    }, Number.isFinite(after) ? after : -1);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    req.on('close', () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  });
+
+  jobRoutes.post('/:job/cancel', async (req, res) => {
+    imageJobs.get(req.params.job, await bookRoot(req)).cancel();
+    res.json({ ok: true });
+  });
+
+  api.use('/books/:id/imagegen/jobs', jobRoutes);
+
+  api.post('/books/:id/candidates/keep', structureRoute((root, req) => keepCandidate(root, req.body?.path, req.body ?? {})));
+  api.delete('/books/:id/candidates', structureRoute((root, req) => discardCandidates(root, { path: req.query.path, job: req.query.job })));
 
   // --- Claude ---
   const claudeRoutes = express.Router({ mergeParams: true });

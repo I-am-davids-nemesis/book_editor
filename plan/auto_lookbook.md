@@ -154,6 +154,16 @@ Step 4 needs part of step 3: the provider interface, the job queue and candidate
 
 ### Step 4: local generation (with step 3's queue and candidates)
 
+**Built** (tried against a fake ComfyUI and the fake provider; not yet against a real ComfyUI). Differences from the plan below:
+- **Unused references:** `imagegen/workflows/flux2-klein-9b.json` follows ComfyUI's official *Flux.2 Klein 9B image edit (distilled)* template, with 4 reference chains. Unused reference nodes are removed and their dependents bypassed by type, using ComfyUI's `/object_info`, so one file covers 0–4 references.
+- **Check:** `check()` also reports missing model files and unknown nodes per workflow. The provider interface is `check() → {ok, message, models}` rather than separate `models()` and `maxRefs()`.
+- **Progress:** the websocket is used for progress when it opens; `/history` polling finds the result either way.
+- **Limits:** `server/imagegen/limits.js` has the per-minute wait and the per-day count, saved in `imagegen-usage.json` beside the config. Nothing uses it yet; it's for step 3.
+- **Candidates:** stored as planned, plus `count` and `size` in "How it was made", so **Vary** repeats the job. Every note rewrite keeps that section, and the caption leaves it out. Old jobs are pruned when a job starts, not on server startup.
+- **Lookbook:** an **Images / Candidates** switch in the header rather than a separate tab. **Keep as reference** asks for the view from a menu. Kept images with a "How it was made" section get **Stage again** in their panel.
+- **Turning on the fake provider:** `"imagegen": {"fake": true}` in the config.
+- **ComfyUI stays a separate app** (decided after the first build). The editor looks for it on 8000 (Desktop's default) then 8188 unless `imagegen.comfyui.url` is set. **Start ComfyUI** runs `open -a ComfyUI` (token required) and waits up to 2 minutes for it to answer. After `unloadAfterMinutes` (default 10) with no jobs, the editor calls ComfyUI's `POST /free`, and **Unload the model** does the same at once.
+
 **Engine: ComfyUI** (the ComfyUI Desktop app on the Mac). It has a documented local HTTP and WebSocket API: `POST /upload/image`, `POST /prompt`, `/ws` for progress, `/history/<id>` and `/view`. Draw Things is easier to install, but reportedly its HTTP API doesn't do edit mode or references (only its gRPC API does), so it isn't first.
 
 **Models:**

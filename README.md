@@ -114,6 +114,39 @@ An open codex entry has two menus above its text:
 - **Middle: the prompt.** The moment or brief, the framing, the setting's and each person's description and fixed traits, the numbered reference images, and the visual style. Edit it freely; **Rebuild it** goes back to the generated one. An entry with no description yet is left out, and the dialog says so.
 - **Right: the references.** Each person's best reference first, then the setting's, then everyone's second, up to the limit you choose. Tick or untick any image of the shot's entries.
 - **Copy and open ChatGPT / Gemini** and **Show in Finder** work as in Prepare. Drop the picture you get back in the Lookbook.
+- **Generate here** makes the picture on this Mac instead (see below): choose the model, the shape and how many, then **Generate**. Progress shows in the dialog and the results appear as they finish.
+
+### Generating on this Mac (ComfyUI)
+
+The editor can generate pictures with [ComfyUI](https://www.comfy.org/download) running on this Mac. It's free and private, and there are no rate limits; a 48 GB Apple Silicon Mac makes a picture in well under a minute.
+
+1. Install **ComfyUI Desktop**.
+2. Download the FLUX.2 [klein] 9B files into ComfyUI's `models` folder (or open ComfyUI's own *Flux.2 Klein 9B image edit* template, which offers to download them):
+   - `diffusion_models/flux-2-klein-9b-fp8.safetensors` ([download](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors))
+   - `text_encoders/qwen_3_8b_fp8mixed.safetensors` ([download](https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors))
+   - `vae/full_encoder_small_decoder.safetensors` ([download](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors))
+3. In **Stage a shot**, the model list says whether ComfyUI is running and whether it has every file. If it isn't running, **Start ComfyUI** opens the app and waits for it (the first start can take a minute). **Check again** after fixing anything else.
+
+ComfyUI stays a separate app: the editor finds it on port 8000 (ComfyUI Desktop) or 8188 (a manual install), and talks to it only there. A loaded model holds a lot of memory, so the editor asks ComfyUI to unload it after 10 minutes with nothing to generate; **Unload the model** in Stage does it at once. Quitting ComfyUI frees everything.
+
+FLUX.2 [klein] takes up to 4 reference images, so Stage lowers **Up to** to 4 when it's chosen. Other workflows (another model, more references) are files in `imagegen/workflows/`; see the README there. Settings in the config, all optional:
+
+```json
+"imagegen": {
+  "comfyui": { "url": "http://127.0.0.1:8188", "app": "ComfyUI", "unloadAfterMinutes": 10 },
+  "fake": true
+}
+```
+
+`url` pins ComfyUI to one address (it must be on this machine), `app` is the Mac app **Start** opens, `unloadAfterMinutes: 0` keeps the model loaded, and `fake` adds a test-pattern generator for trying all this without a model.
+
+**Candidates.** Generated pictures don't go straight into the book. They wait in the Lookbook's **Candidates** view, grouped by shot, newest first:
+
+- **Keep…** moves one into the lookbook under a name you give, linked to the shot's codex entries. **★ ▾** keeps it as a reference of the view you pick.
+- **×** discards one; **Discard all** discards the group.
+- **Stage again** reopens the shot in Stage, as it was. **Vary** makes the same number again with new seeds.
+
+Candidates live in `lookbook/.candidates/`, which the editor adds to the repository's `.git/info/exclude`, so they're never committed and the book's own files don't change. Ones older than 30 days are deleted. A kept picture's note ends with a **How it was made** section (the model, seed, prompt, the references and the commit each was at, and the shot), and its Lookbook panel has **Stage again**. Jobs run one at a time; a page reload picks up a running job, but restarting the server forgets it (its finished pictures stay).
 
 The **Claude ▾** actions are ordinary Claude runs: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
 

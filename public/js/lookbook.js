@@ -1,11 +1,13 @@
 import { api } from './api.js';
 import { IMAGE_TOOLS, imagePromptFrom } from './codexprompts.js';
 import { confirmDialog, promptDialog } from './dialogs.js';
+import { jobReduce, jobStatus, watchJob } from './generate.js';
 import { handoffDialog, loadVisualStyle } from './handoff.js';
+import { splitMade } from './provenance.js';
 import { codexEntries, imagesByEntry } from './tree.js';
 import { bookHref, h, imageSrc, showMenu, toast } from './ui.js';
 import {
-  ALL_VIEWS, fixedTraits, handoffPrompt, isReference, missingViews, rankImages, variantsIn, VIEW_LABELS, VIEWS,
+  ALL_VIEWS, fixedTraits, handoffPrompt, isReference, missingViews, rankImages, shotName, variantsIn, VIEW_LABELS, VIEWS,
 } from './worldmodel.js';
 
 // Matches MAX_IMAGE_BYTES on the server.
@@ -166,7 +168,9 @@ export function entryStrip({ bookId, tree, entry, getText, onAdd, onStage, claud
 // The Lookbook: every image in the book as a grid, filtered by codex entry,
 // with a detail panel for the chosen image (links, caption, name).
 //   actions: { back(), run(fn) → result|null (a structure change, like the
-//   sidebar's), upload(files, of), refine(image, entries), visualStyle(), stage() }
+//   sidebar's), upload(files, of), refine(image, entries), visualStyle(),
+//   stage(initial) }
+// Its Candidates view holds generated images waiting to be kept or discarded.
 export class LookbookView {
   constructor({ bookId, actions }) {
     this.bookId = bookId;
@@ -174,6 +178,11 @@ export class LookbookView {
     this.tree = null;
     this.selected = null;
     this.filter = ''; // '' all, '-' not linked, '*' references, or a codex path
+    this.mode = 'images'; // or 'candidates'
+    this.jobs = new Map(); // job id → { state, stop, el } for jobs still running
+
+    this.imagesTab = h('button', { type: 'button', onclick: () => this.setMode('images') }, 'Images');
+    this.candidatesTab = h('button', { type: 'button', onclick: () => this.setMode('candidates') }, 'Candidates');
 
     this.filterEl = h('select', { 'aria-label': 'Show images of', onchange: () => { this.filter = this.filterEl.value; this.render(); } });
     this.countEl = h('span', { class: 'muted' });
@@ -183,6 +192,7 @@ export class LookbookView {
       h('div', { class: 'lookbook-head' },
         h('button', { type: 'button', onclick: () => this.actions.back() }, '← Back to writing'),
         h('h2', {}, 'Lookbook'),
+        h('div', { class: 'segmented' }, this.imagesTab, this.candidatesTab),
         this.filterEl,
         this.countEl,
         h('span', { class: 'spacer' }),
@@ -240,7 +250,27 @@ export class LookbookView {
     location.hash = bookHref(this.bookId, 'lookbook', path);
   }
 
+  setMode(mode) {
+    this.mode = mode;
+    if (mode === 'candidates') {
+      this.selected = null;
+      this.followJobs();
+    }
+    if (this.visible) this.render();
+  }
+
   render() {
+    const pending = this.tree.candidates?.length ?? 0;
+    this.candidatesTab.textContent = pending ? `Candidates (${pending})` : 'Candidates';
+    this.imagesTab.setAttribute('aria-pressed', String(this.mode === 'images'));
+    this.candidatesTab.setAttribute('aria-pressed', String(this.mode === 'candidates'));
+    this.filterEl.hidden = this.mode !== 'images';
+    this.countEl.hidden = this.mode !== 'images';
+    if (this.mode === 'candidates') {
+      this.detailEl.hidden = true;
+      this.renderCandidates();
+      return;
+    }
     const { lookbook } = this.tree;
     const entries = codexEntries(this.tree);
     const byEntry = imagesByEntry(this.tree);
@@ -334,10 +364,151 @@ export class LookbookView {
           title: linked.some((e) => !e.missing) ? 'Claude looks at this image and adds what it settles to the linked entries’ descriptions' : 'Link the image to a codex entry first',
           onclick: () => this.actions.refine(img, linked.filter((e) => !e.missing)),
         }, 'Refine descriptions from this image')),
+      img.made ? h('div', { class: 'dialog-buttons' },
+        h('button', { type: 'button', title: 'Open the shot this image was generated from in the Stage dialog', onclick: () => this.stageAgain(img) }, 'Stage again')) : null,
       h('div', { class: 'dialog-buttons' },
         img.hasNote ? h('a', { class: 'button', href: bookHref(this.bookId, 'codex', img.notePath), title: 'Edit the note beside the image as text' }, 'Open note') : null,
         h('button', { type: 'button', onclick: () => this.rename(img) }, 'Rename…'),
         h('button', { type: 'button', class: 'danger', onclick: () => this.remove(img) }, 'Delete…')));
+  }
+
+  async stageAgain(img) {
+    try {
+      const { made } = splitMade((await api.readFile(this.bookId, img.notePath)).content);
+      if (!made?.shot) throw new Error('The note doesn’t say which shot this was');
+      this.actions.stage(made.shot);
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  }
+
+  // --- candidates ---------------------------------------------------------------
+
+  // Picks up jobs still running (after a reload, or started in Stage).
+  async followJobs() {
+    let jobs;
+    try {
+      jobs = await api.imageJobs(this.bookId);
+    } catch {
+      return;
+    }
+    for (const job of jobs) if (['queued', 'running'].includes(job.status)) this.follow(job.id, job.n);
+    if (this.visible && this.mode === 'candidates') this.render();
+  }
+
+  follow(id, n = 1) {
+    if (this.jobs.has(id)) return;
+    const entry = { state: { n }, el: null };
+    this.jobs.set(id, entry);
+    entry.stop = watchJob(this.bookId, id, (e) => {
+      entry.state = jobReduce(entry.state, e);
+      if (entry.el) entry.el.textContent = jobStatus(entry.state);
+      if (e.type === 'error') toast(e.message, { error: true, ms: 8000 });
+    }, () => {
+      this.jobs.delete(id);
+      if (this.visible && this.mode === 'candidates') this.render();
+    });
+  }
+
+  renderCandidates() {
+    const entries = codexEntries(this.tree);
+    const byPath = new Map(entries.map((e) => [e.path, e]));
+    const groups = new Map();
+    for (const id of this.jobs.keys()) groups.set(id, []);
+    for (const c of this.tree.candidates ?? []) {
+      if (!groups.has(c.job)) groups.set(c.job, []);
+      groups.get(c.job).push(c);
+    }
+    const ordered = [...groups].sort((a, b) => b[0].localeCompare(a[0]));
+    this.gridEl.replaceChildren(...(ordered.length ? ordered.map(([job, items]) => this.candidateGroup(job, items, byPath)) : [
+      h('div', { class: 'placeholder lookbook-empty' }, h('div', {},
+        h('p', {}, 'No candidates. Generated images wait here until you keep or discard them.'),
+        h('p', { class: 'muted' }, 'Use “Stage a shot”, then Generate.'))),
+    ]));
+  }
+
+  candidateGroup(job, items, byPath) {
+    const made = items[0]?.made ?? null;
+    const running = this.jobs.get(job);
+    const statusEl = running ? h('span', { class: 'candidate-status' }, jobStatus(running.state)) : null;
+    if (running) running.el = statusEl;
+    const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(job);
+    const when = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : job;
+    const refs = made?.references?.length ?? 0;
+    const title = made ? shotName(made.shot, byPath, made.prompt.slice(0, 60)) : 'Generating…';
+    const kinds = new Set((items[0]?.of ?? []).map((p) => byPath.get(p)?.kind).filter(Boolean));
+    const views = ALL_VIEWS.filter((v) => !kinds.size || [...kinds].some((k) => VIEWS[k]?.includes(v)));
+
+    return h('section', { class: 'candidate-group' },
+      h('div', { class: 'candidate-head' },
+        h('div', {},
+          h('strong', {}, title),
+          h('span', { class: 'muted' }, [when, made?.model, made && `${refs} ${refs === 1 ? 'reference' : 'references'}`].filter(Boolean).join(' · ')),
+          statusEl),
+        h('span', { class: 'spacer' }),
+        running ? h('button', { type: 'button', onclick: () => api.cancelImageJob(this.bookId, job).catch((err) => toast(err.message, { error: true })) }, 'Cancel') : null,
+        made?.shot ? h('button', { type: 'button', title: 'Open this shot in the Stage dialog', onclick: () => this.actions.stage(made.shot) }, 'Stage again') : null,
+        made ? h('button', { type: 'button', title: 'Make the same number again with new seeds', onclick: () => this.vary(made, made.count ?? items.length) }, 'Vary') : null,
+        items.length ? h('button', { type: 'button', class: 'danger', onclick: () => this.discardJob(job, items.length) }, 'Discard all') : null),
+      h('div', { class: 'candidate-grid' }, items.map((c) => h('figure', { class: 'candidate' },
+        h('a', { href: imageSrc(this.bookId, c), target: '_blank', rel: 'noopener', title: 'Open full size in a new tab' },
+          h('img', { src: imageSrc(this.bookId, c), alt: `Candidate ${c.n}`, loading: 'lazy' })),
+        h('figcaption', {},
+          h('span', { class: 'muted' }, c.made?.seed !== undefined ? `Seed ${c.made.seed}` : `#${c.n}`),
+          h('button', { type: 'button', class: 'primary', onclick: () => this.keep(c, title) }, 'Keep…'),
+          h('button', {
+            type: 'button',
+            'aria-haspopup': 'menu',
+            title: 'Keep it as a reference image, to send with later prompts',
+            onclick: (e) => showMenu(e.currentTarget, views.map((v) => ({ label: `Keep as reference: ${VIEW_LABELS[v]}…`, onclick: () => this.keep(c, title, v) }))),
+          }, '★ ▾'),
+          h('button', { type: 'button', class: 'danger', title: 'Discard this image', 'aria-label': 'Discard', onclick: () => this.discard(c) }, '×'))))));
+  }
+
+  async keep(c, title, view = null) {
+    const name = await promptDialog({
+      title: view ? `Keep as a reference (${VIEW_LABELS[view].toLowerCase()})` : 'Keep this image',
+      label: 'Name',
+      value: title,
+      okLabel: 'Keep',
+      hint: 'It moves into the lookbook, linked to the shot’s codex entries, with a note of how it was made.',
+    });
+    if (!name) return;
+    const res = await this.actions.run(() => api.keepCandidate(this.bookId, c.path, { name, reference: Boolean(view), view: view ?? '' }));
+    if (res) toast(`Kept as ${res.path}`);
+  }
+
+  async discard(c) {
+    await this.actions.run(() => api.discardCandidate(this.bookId, c.path));
+  }
+
+  async discardJob(job, count) {
+    const ok = await confirmDialog({
+      title: `Discard ${count === 1 ? 'this image' : `all ${count} images`}?`,
+      message: 'Candidates aren’t in git, so they can’t be restored.',
+      okLabel: 'Discard',
+      danger: true,
+    });
+    if (ok) await this.actions.run(() => api.discardJob(this.bookId, job));
+  }
+
+  async vary(made, n) {
+    try {
+      const job = await api.startImageJob(this.bookId, {
+        provider: made.provider,
+        model: made.model,
+        prompt: made.prompt,
+        negative: made.negative ?? '',
+        refs: (made.references ?? []).map((r) => r.path),
+        size: made.size,
+        n: Math.min(Math.max(n, 1), 4),
+        shot: made.shot,
+      });
+      this.follow(job.id, job.n);
+      this.render();
+    } catch (err) {
+      toast(err.message, { error: true, ms: 8000 });
+    }
   }
 
   // Whether the image is a reference for generating more pictures of what it

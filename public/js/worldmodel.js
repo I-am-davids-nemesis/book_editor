@@ -225,3 +225,13 @@ export function mentionedEntries(text, entries) {
   const has = (name) => name.length > 1 && new RegExp(`(^|[^\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(words);
   return entries.filter((e) => has(e.title) || (e.title.includes(' ') && has(e.title.split(' ')[0]) && e.kind === 'character')).map((e) => e.path);
 }
+
+// A short name for a shot: "Tor and Davie at the Washing House", or the
+// prompt's start when it names no one.
+export function shotName(shot, byPath, fallback = 'Shot') {
+  const names = (shot?.characters ?? []).map((c) => byPath.get(c.path)?.title).filter(Boolean);
+  const place = shot?.location ? byPath.get(shot.location)?.title : null;
+  const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+  if (who && place) return `${who} at ${place}`;
+  return who || place || fallback;
+}

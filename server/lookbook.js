@@ -4,6 +4,7 @@ import { badRequest, conflict, notFound } from './errors.js';
 import { slugify, titleize } from './names.js';
 import { resolveInBook } from './paths.js';
 import { applyMoves } from './structure.js';
+import { formatMade, splitMade } from '../public/js/provenance.js';
 import { ALL_VIEWS } from '../public/js/worldmodel.js';
 
 // The lookbook is the book's picture folder: images in lookbook/, each with
@@ -21,14 +22,16 @@ import { ALL_VIEWS } from '../public/js/worldmodel.js';
 // The image line makes the note show its picture in Obsidian; the editor
 // reads the caption from what follows it. A reference image for generating
 // more pictures also has `use: reference`, a `view:` (face, full, …) and maybe
-// a `variant:` (winter coat, age 12, …).
+// a `variant:` (winter coat, age 12, …). A generated image's note ends with a
+// "## How it was made" section (see provenance.js), which the caption leaves
+// out and every rewrite keeps.
 
 export const LOOKBOOK = 'lookbook';
 export const MAX_IMAGE_BYTES = 14 * 1024 * 1024; // fits the 20 MB JSON body as base64
 export const IMAGE_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' };
 
 export const isImagePath = (rel) => Object.hasOwn(IMAGE_TYPES, path.posix.extname(rel).slice(1).toLowerCase());
-const notePathOf = (rel) => rel.replace(/\.[^./]+$/, '.md');
+export const notePathOf = (rel) => rel.replace(/\.[^./]+$/, '.md');
 
 // The format from the file's first bytes, so an image's extension always
 // matches what it is.
@@ -77,7 +80,8 @@ const keyLine = (key) => new RegExp(`^${key}\\s*:`);
 
 // Reads `of:` as a block list, an inline [a, b] list or a single value.
 export function parseNote(text, imageName) {
-  const { front, body } = splitFrontMatter(text);
+  const { front, body: whole } = splitFrontMatter(text);
+  const body = splitMade(whole).rest;
   const range = ofRange(front);
   let of = [];
   if (range) {
@@ -99,9 +103,11 @@ export function parseNote(text, imageName) {
 
 // The note's text with new links and caption, and the `meta` keys that are
 // given ('' removes one). Other front matter (tags, anything added in
-// Obsidian) is kept. Returns '' when nothing is left to say.
-export function writeNote(previous, { of, caption, imageName, title, meta = {} }) {
-  const { front } = splitFrontMatter(previous);
+// Obsidian) is kept, and so is the "How it was made" section, unless `made`
+// gives a new one. Returns '' when nothing is left to say.
+export function writeNote(previous, { of, caption, imageName, title, meta = {}, made }) {
+  const { front, body } = splitFrontMatter(previous);
+  const madeText = made ? formatMade(made) : splitMade(body).raw;
   const range = ofRange(front);
   const ofLines = of.length ? ['of:', ...of.map((p) => `  - ${quote(p)}`)] : [];
   const rest = range ? [...front.slice(0, range[0]), ...front.slice(range[1])] : front;
@@ -117,15 +123,15 @@ export function writeNote(previous, { of, caption, imageName, title, meta = {} }
     else all.splice(at, 1);
   }
   const lines = all.filter((l, i) => l.trim() || i < all.length - 1);
-  if (!lines.some((l) => l.trim()) && !caption) return '';
+  if (!lines.some((l) => l.trim()) && !caption && !madeText) return '';
   const head = lines.some((l) => l.trim()) ? `---\n${lines.join('\n')}\n---\n\n` : '';
   const target = /[\s()<>]/.test(imageName) ? `<${imageName}>` : imageName;
-  return `${head}![${title}](${target})\n${caption ? `\n${caption}\n` : ''}`;
+  return `${head}![${title}](${target})\n${caption ? `\n${caption}\n` : ''}${madeText ? `\n${madeText}\n` : ''}`;
 }
 
 // --- reading ------------------------------------------------------------------
 
-async function readText(abs) {
+export async function readText(abs) {
   try {
     return await fs.readFile(abs, 'utf8');
   } catch (err) {
@@ -153,7 +159,8 @@ async function walkImages(root, rel) {
 }
 
 // Every image in the lookbook, by name:
-//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, use, view, variant, size, mtime }]
+//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, use, view, variant, made, size, mtime }]
+// `made` says the note records how the image was generated.
 export async function listLookbook(root) {
   const items = [];
   for (const rel of await walkImages(root, LOOKBOOK)) {
@@ -168,6 +175,7 @@ export async function listLookbook(root) {
       notePath,
       hasNote: note !== null,
       ...parseNote(note ?? '', name),
+      made: splitMade(note ?? '').raw !== '',
       size: stat.size,
       mtime: Math.round(stat.mtimeMs),
     });
@@ -186,7 +194,7 @@ function requireImagePath(rel) {
   if (!ok) throw badRequest('Only images in lookbook/ can be changed here');
 }
 
-async function requireExists(root, rel) {
+export async function requireExists(root, rel) {
   try {
     await fs.access(await resolveInBook(root, rel));
   } catch (err) {
@@ -219,12 +227,12 @@ function checkMeta({ use, view, variant }) {
   return { use, view, variant: variant?.trim() };
 }
 
-async function saveNote(root, imageRel, { of, caption, meta }) {
+export async function saveNote(root, imageRel, { of, caption, meta, made }) {
   const notePath = notePathOf(imageRel);
   const abs = await resolveInBook(root, notePath);
   const previous = (await readText(abs)) ?? '';
   const name = path.posix.basename(imageRel);
-  const text = writeNote(previous, { of, caption, meta, imageName: name, title: titleize(name.replace(/\.[^.]+$/, '')) });
+  const text = writeNote(previous, { of, caption, meta, made, imageName: name, title: titleize(name.replace(/\.[^.]+$/, '')) });
   if (text) {
     await fs.writeFile(abs, text);
     return previous ? [] : [notePath];
@@ -234,7 +242,7 @@ async function saveNote(root, imageRel, { of, caption, meta }) {
 }
 
 // A name in lookbook/ that no image or note uses yet: slug.ext, slug-2.ext, ...
-async function freeName(root, slug, ext) {
+export async function freeName(root, slug, ext) {
   const taken = new Set((await fs.readdir(path.join(root, LOOKBOOK)).catch(() => []))
     .map((n) => n.toLowerCase().replace(/\.[^.]+$/, '')));
   let base = slug;

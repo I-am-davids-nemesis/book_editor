@@ -87,6 +87,17 @@ export const api = {
   handoff: (id, paths, name) => request('POST', `${book(id)}/handoff`, { paths, name }),
   addVisualStyle: (id) => request('POST', `${book(id)}/visual-style`, {}),
 
+  imageProviders: () => request('GET', '/api/imagegen/providers'),
+  startImageProvider: (provider) => request('POST', `/api/imagegen/providers/${encodeURIComponent(provider)}/start`, {}),
+  freeImageProvider: (provider) => request('POST', `/api/imagegen/providers/${encodeURIComponent(provider)}/free`, {}),
+  imageJobs: (id) => request('GET', `${book(id)}/imagegen/jobs`),
+  startImageJob: (id, job) => request('POST', `${book(id)}/imagegen/jobs`, job),
+  cancelImageJob: (id, job) => request('POST', `${book(id)}/imagegen/jobs/${encodeURIComponent(job)}/cancel`),
+  imageJobEventsUrl: (id, job) => `${book(id)}/imagegen/jobs/${encodeURIComponent(job)}/events?token=${encodeURIComponent(TOKEN)}`,
+  keepCandidate: (id, path, opts) => request('POST', `${book(id)}/candidates/keep`, { path, ...opts }),
+  discardCandidate: (id, path) => request('DELETE', `${book(id)}/candidates?path=${encodeURIComponent(path)}`),
+  discardJob: (id, job) => request('DELETE', `${book(id)}/candidates?job=${encodeURIComponent(job)}`),
+
   addCodex: (id, kind, name) => request('POST', `${book(id)}/codex`, { kind, name }),
   renameCodex: (id, path, name) => request('PATCH', `${book(id)}/codex`, { path, name }),
   deleteCodex: (id, path) => request('DELETE', `${book(id)}/codex?path=${encodeURIComponent(path)}`),
