@@ -16,6 +16,7 @@ codex/
   characters/             # one file per character
   locations/              # one file per location
   _templates/             # templates the editor uses for new entries
+  visual-style.md         # how every picture of the book should look
   *.md                    # free-form notes
 lookbook/
   tor-at-the-well.jpg     # images (PNG, JPEG, GIF, WebP, AVIF)
@@ -31,7 +32,8 @@ book.json                 # optional settings, e.g. {"compile": {"sceneSeparator
 - **Reordering:** renumber with `git mv` so history follows the file.
 - **Scene files hold prose only.** Plot, POV and who's present go in the outline file.
 - **Codex before manuscript.** If a draft needs a fact not in the codex, add it to the codex in the same change. Each fact lives in one place; other files link to it.
-- **Lookbook:** an image's note has front matter `of:` with a list of codex paths (`codex/characters/tor.md`), then an embed of the image, then a caption. When you rename or delete a codex entry outside the editor, update the `of:` lists that mention it.
+- **Lookbook:** an image's note has front matter `of:` with a list of codex paths (`codex/characters/tor.md`), then an embed of the image, then a caption. When you rename or delete a codex entry outside the editor, update the `of:` lists that mention it. A reference image (one that sets how an entry should look in new pictures) also has `use: reference`, a `view:` (`face`, `full`, `turnaround`, `expressions`, `establishing`, `interior` or `map`) and maybe a `variant:`.
+- **Fixed traits:** the `## Fixed traits` section of a character or location lists what must look the same in every picture. It's the writer's: don't change it unless asked; propose changes under the Description's Open questions instead.
 - **Narration modes:** a middle segment in a scene name (`01-opening.camera.md`) marks that scene in one narration mode. Don't use it for anything else.
 - **Compiling:** run `node ~/workspace/local_editor/bin/compile.mjs` from the book folder (every chapter and mode, plus the whole book), or pass a chapter (`03-the-courtyard` or `3`) and/or `--mode <mode>`. Output goes to `compiled/`. The editor's **Compile…** button does the same.
 - **No code in the book.** The book holds prose, outlines, codex and notes only. Tools (compiling, checks, scripts of any kind) belong in the editor project at `~/workspace/local_editor`; add them there, not here.

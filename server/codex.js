@@ -6,6 +6,7 @@ import { applyMoves } from './structure.js';
 import { slugify } from './names.js';
 import { resolveInBook } from './paths.js';
 import { renderTemplate } from './templates.js';
+import { VISUAL_STYLE } from '../public/js/worldmodel.js';
 
 const KINDS = {
   character: { dir: 'codex/characters', template: 'character' },
@@ -72,4 +73,19 @@ export async function deleteCodexEntry(root, rel) {
   // Its images stay in the lookbook, unlinked from it.
   await relinkCodex(root, rel, null);
   return { moves: [], created: [], deleted: [rel] };
+}
+
+// The book's visual style note, at a fixed path so the editor, Claude and the
+// writer all find it. Creates it from the template if it isn't there yet.
+export async function addVisualStyle(root) {
+  const abs = await resolveInBook(root, VISUAL_STYLE);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  const content = await renderTemplate(root, 'visual-style', { name: 'Visual style' });
+  try {
+    await fs.writeFile(abs, content, { flag: 'wx' });
+  } catch (err) {
+    if (err.code === 'EEXIST') return { path: VISUAL_STYLE, moves: [], created: [], deleted: [] };
+    throw err;
+  }
+  return { path: VISUAL_STYLE, moves: [], created: [VISUAL_STYLE], deleted: [] };
 }

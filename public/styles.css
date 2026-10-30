@@ -570,6 +570,7 @@ a.button.primary { background: var(--accent); border-color: var(--accent); color
 .field-label { font-weight: 600; font-size: 13px; }
 .field-hint { font-size: 12px; color: var(--muted); }
 .field input, .field select { width: 100%; }
+.field input[type="checkbox"] { width: auto; flex: none; margin: 3px 0 0; }
 .dialog .error { margin: 0; }
 .dialog .error:empty { display: none; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
@@ -828,6 +829,38 @@ a.button:hover { border-color: var(--accent); }
 button.thumb.add-thumb { padding: 0; color: var(--accent); font-size: 13px; border-style: dashed; border-color: var(--divider); }
 button.thumb.add-thumb:only-child { width: auto; height: 32px; padding: 0 12px; }
 .row-thumb { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; flex: none; border: 1px solid var(--border); }
+
+/* references: approved images that are sent along with prompts */
+.thumb { position: relative; }
+.thumb.ref { border: 2px solid var(--accent); }
+.ref-star { position: absolute; top: 1px; right: 3px; color: var(--accent); font-size: 13px; text-shadow: 0 0 2px var(--surface), 0 0 2px var(--surface); }
+.entry-images { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.model-gaps { font-size: 12px; color: var(--muted); padding: 0 12px 6px; text-decoration: none; }
+.model-gaps:hover { color: var(--accent); text-decoration: underline; }
+.lookbook-img { position: relative; }
+.ref-badge { position: absolute; left: 6px; bottom: 6px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: var(--accent); color: var(--surface); }
+.reference-fields { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar); }
+.reference-fields .check { align-items: flex-start; }
+.reference-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.lookbook-detail .reference-row select { margin-top: 0; }
+.reference-row select { width: auto; flex: none; }
+.reference-row input[type=text] { width: auto; flex: 1; min-width: 140px; font: inherit; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.reference-row :disabled { opacity: 0.55; }
+
+/* handing an entry to an outside image generator */
+.dialog.handoff-dialog { width: min(980px, calc(100vw - 32px)); }
+.handoff-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+.handoff-prompt { min-height: 320px; font: 14px/1.5 var(--prose-font) !important; }
+.handoff-refs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: scroll; }
+.handoff-ref { display: grid; grid-template-columns: 22px 64px 1fr; gap: 8px; align-items: center; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.handoff-ref.on { border-color: var(--accent); }
+.handoff-ref img { width: 64px; height: 64px; object-fit: cover; border-radius: 5px; cursor: grab; }
+.handoff-ref:not(.on) img { opacity: 0.5; }
+.handoff-num { font-weight: 700; color: var(--accent); text-align: center; }
+.handoff-ref label { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; }
+.handoff-ref input[type="checkbox"] { flex: none; margin-top: 3px; }
+.handoff-ref label > span { display: flex; flex-direction: column; }
+@media (max-width: 720px) { .handoff-body { grid-template-columns: 1fr; } }
 
 /* images in History */
 .image-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }

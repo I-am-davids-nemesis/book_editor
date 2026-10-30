@@ -82,7 +82,7 @@ A scene can exist in several modes as `01-opening.camera.md`, `01-opening.rotati
 
 The lookbook holds pictures of your characters, places and things, each linked to the codex entries it shows. An image can show several entries, and an entry can have many images.
 
-- **Lookbook** in the top bar (or in the Codex tab) opens it: every image as a grid. The menu at the top filters it to one entry's images, or to images not linked to anything.
+- **Lookbook** in the top bar (or in the Codex tab) opens it: every image as a grid. The menu at the top filters it to one entry's images, to references, or to images not linked to anything.
 - **+ Add images**, or drop image files anywhere on the page. If the view is filtered to an entry, new images are linked to it. PNG, JPEG, GIF, WebP and AVIF work, up to 14 MB each.
 - Click an image to see it large, link or unlink codex entries, write a caption, rename it or delete it. Esc closes it.
 - An open codex entry shows its images in a strip above the text. Drop images on the strip, or use **+**, to add images already linked to that entry. The sidebar shows each entry's first image beside its name.
@@ -94,9 +94,16 @@ The lookbook holds pictures of your characters, places and things, each linked t
 An open codex entry has two menus above its text:
 
 - **Claude ▾ → Gather a description from the manuscript.** Claude finds every passage that describes the entry (in every chapter and mode) and writes a `## Description` section into it. The section has the consolidated description, an **Image prompt**, the quotes it used with their scene files, and open questions such as contradictions. Running it again replaces the section.
-- **Image prompt ▾** copies that prompt and opens ChatGPT or Gemini in a new tab. Paste it there, download the picture you like, and drop it on the entry's image strip. It's added to the lookbook already linked to the entry.
+- **Claude ▾ → Draft fixed traits from the description.** Claude writes a `## Fixed traits` section: the few visual facts that must be the same in every picture (which cheek the scar is on, eye color, height next to others). Fixed traits are yours: Gather and Refine never change them, they only propose additions under Open questions.
+- **Image prompt ▾ → Prepare for ChatGPT / Gemini…** opens the full prompt (the image prompt, the fixed traits, the numbered reference images and the book's visual style) beside the entry's references. **Copy and open ChatGPT** copies the prompt and opens the site. Attach the numbered images in order: drag them from the dialog into the other tab, or use **Show in Finder**, which copies them to a temporary folder as `1-…`, `2-…`. Download the picture you like and drop it on the entry's image strip; it's added to the lookbook already linked to the entry. **Copy image prompt only** copies the prompt without references.
 - **Claude ▾ → Refine the description from its images.** Claude looks at the entry's images and adds the details they settle (colors, materials, wear, expression) to the description. Where a picture contradicts the manuscript, Claude lists the conflict under Open questions instead of changing anything, and it updates the image prompt to match. In the Lookbook, **Refine descriptions from this image** does the same for one image and every entry it's linked to.
 - **Claude ▾ → Suggest manuscript edits from the description.** Claude lists numbered suggestions (file, original sentence, revised sentence) without changing anything. Reply in the panel with the ones to apply.
+
+### A consistent look: visual style and references
+
+- **Visual style.** **Visual style** in the Lookbook opens `codex/visual-style.md` (creating it the first time): medium, palette, period and setting, light, framing, and what to avoid. It's added to every prompt the editor prepares, so all the book's pictures share one look. Empty sections are left out.
+- **References.** In the Lookbook, tick **★ Reference** on the images that show a character or place the way it should look, and pick the view (face, full length, turnaround, expressions; establishing shot, interior, map) and, if it's a variant, its name (`winter coat`, `age 12`). References are sent with prompts, come first in an entry's strip with a ★, and the strip says which views the model sheet still lacks. Link a reference only to the entry it's a reference of.
+- **Variants.** A `### Variant: winter coat` subsection in an entry's Description describes a look the character has for part of the book. The Lookbook suggests those names for references.
 
 Each of these is an ordinary Claude run: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
 
@@ -106,6 +113,8 @@ On disk, images live in `lookbook/`. Each linked or captioned image has a note b
 ---
 of:
   - codex/characters/tor.md
+use: reference
+view: face
 ---
 
 ![Tor at the Well](tor-at-the-well.jpg)

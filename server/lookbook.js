@@ -4,6 +4,7 @@ import { badRequest, conflict, notFound } from './errors.js';
 import { slugify, titleize } from './names.js';
 import { resolveInBook } from './paths.js';
 import { applyMoves } from './structure.js';
+import { ALL_VIEWS } from '../public/js/worldmodel.js';
 
 // The lookbook is the book's picture folder: images in lookbook/, each with
 // an optional note of the same name that says which codex entries it shows:
@@ -18,7 +19,9 @@ import { applyMoves } from './structure.js';
 //                                 Caption.
 //
 // The image line makes the note show its picture in Obsidian; the editor
-// reads the caption from what follows it.
+// reads the caption from what follows it. A reference image for generating
+// more pictures also has `use: reference`, a `view:` (face, full, …) and maybe
+// a `variant:` (winter coat, age 12, …).
 
 export const LOOKBOOK = 'lookbook';
 export const MAX_IMAGE_BYTES = 14 * 1024 * 1024; // fits the 20 MB JSON body as base64
@@ -68,6 +71,10 @@ function ofRange(front) {
   return [start, end];
 }
 
+// The single-line front matter keys the editor reads and writes besides `of`.
+export const META_KEYS = ['use', 'view', 'variant'];
+const keyLine = (key) => new RegExp(`^${key}\\s*:`);
+
 // Reads `of:` as a block list, an inline [a, b] list or a single value.
 export function parseNote(text, imageName) {
   const { front, body } = splitFrontMatter(text);
@@ -83,18 +90,33 @@ export function parseNote(text, imageName) {
   while (lines.length && !lines[0].trim()) lines.shift();
   const embed = /^!\[[^\]]*\]\(<?([^)>]*)>?\)\s*$/.exec(lines[0] ?? '');
   if (embed && decodeURI(embed[1]) === imageName) lines.shift();
-  return { of: [...new Set(of.filter(Boolean))], caption: lines.join('\n').trim() };
+  const meta = Object.fromEntries(META_KEYS.map((key) => {
+    const line = front.find((l) => keyLine(key).test(l));
+    return [key, line ? unquote(line.replace(keyLine(key), '')) : ''];
+  }));
+  return { of: [...new Set(of.filter(Boolean))], caption: lines.join('\n').trim(), ...meta };
 }
 
-// The note's text with new links and caption. Other front matter (tags,
-// anything added in Obsidian) is kept. Returns '' when nothing is left to say.
-export function writeNote(previous, { of, caption, imageName, title }) {
+// The note's text with new links and caption, and the `meta` keys that are
+// given ('' removes one). Other front matter (tags, anything added in
+// Obsidian) is kept. Returns '' when nothing is left to say.
+export function writeNote(previous, { of, caption, imageName, title, meta = {} }) {
   const { front } = splitFrontMatter(previous);
   const range = ofRange(front);
   const ofLines = of.length ? ['of:', ...of.map((p) => `  - ${quote(p)}`)] : [];
   const rest = range ? [...front.slice(0, range[0]), ...front.slice(range[1])] : front;
   const insertAt = range ? range[0] : 0;
-  const lines = [...rest.slice(0, insertAt), ...ofLines, ...rest.slice(insertAt)].filter((l, i, all) => l.trim() || i < all.length - 1);
+  const all = [...rest.slice(0, insertAt), ...ofLines, ...rest.slice(insertAt)];
+  for (const [key, value] of Object.entries(meta)) {
+    if (value === undefined) continue;
+    const at = all.findIndex((l) => keyLine(key).test(l));
+    const line = value ? `${key}: ${quote(value)}` : null;
+    if (at === -1) {
+      if (line) all.push(line);
+    } else if (line) all[at] = line;
+    else all.splice(at, 1);
+  }
+  const lines = all.filter((l, i) => l.trim() || i < all.length - 1);
   if (!lines.some((l) => l.trim()) && !caption) return '';
   const head = lines.some((l) => l.trim()) ? `---\n${lines.join('\n')}\n---\n\n` : '';
   const target = /[\s()<>]/.test(imageName) ? `<${imageName}>` : imageName;
@@ -131,7 +153,7 @@ async function walkImages(root, rel) {
 }
 
 // Every image in the lookbook, by name:
-//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, size, mtime }]
+//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, use, view, variant, size, mtime }]
 export async function listLookbook(root) {
   const items = [];
   for (const rel of await walkImages(root, LOOKBOOK)) {
@@ -145,7 +167,7 @@ export async function listLookbook(root) {
       title: titleize(name.replace(/\.[^.]+$/, '')),
       notePath,
       hasNote: note !== null,
-      ...(note === null ? { of: [], caption: '' } : parseNote(note, name)),
+      ...parseNote(note ?? '', name),
       size: stat.size,
       mtime: Math.round(stat.mtimeMs),
     });
@@ -186,12 +208,23 @@ async function checkLinks(root, of) {
   return unique;
 }
 
-async function saveNote(root, imageRel, { of, caption }) {
+// What a reference image is: `use` is 'reference' or '', `view` one of the
+// known views or '', `variant` one short line. Undefined keys are left alone.
+function checkMeta({ use, view, variant }) {
+  if (use !== undefined && !['', 'reference'].includes(use)) throw badRequest('`use` must be "reference" or empty');
+  if (view !== undefined && view !== '' && !ALL_VIEWS.includes(view)) throw badRequest(`\`view\` must be one of: ${ALL_VIEWS.join(', ')}`);
+  if (variant !== undefined && (typeof variant !== 'string' || /[\r\n]/.test(variant) || variant.trim().length > 60)) {
+    throw badRequest('`variant` must be one line of at most 60 characters');
+  }
+  return { use, view, variant: variant?.trim() };
+}
+
+async function saveNote(root, imageRel, { of, caption, meta }) {
   const notePath = notePathOf(imageRel);
   const abs = await resolveInBook(root, notePath);
   const previous = (await readText(abs)) ?? '';
   const name = path.posix.basename(imageRel);
-  const text = writeNote(previous, { of, caption, imageName: name, title: titleize(name.replace(/\.[^.]+$/, '')) });
+  const text = writeNote(previous, { of, caption, meta, imageName: name, title: titleize(name.replace(/\.[^.]+$/, '')) });
   if (text) {
     await fs.writeFile(abs, text);
     return previous ? [] : [notePath];
@@ -233,10 +266,12 @@ export async function addImage(root, { filename, name, data, of = [], caption = 
   return { path: rel, moves: [], created, deleted: [] };
 }
 
-// Changes an image's links or caption, or renames it (with its note).
-export async function updateImage(root, rel, { of, caption, name } = {}) {
+// Changes an image's links, caption or reference keys, or renames it (with
+// its note).
+export async function updateImage(root, rel, { of, caption, name, use, view, variant } = {}) {
   requireImagePath(rel);
   await requireExists(root, rel);
+  const meta = checkMeta({ use, view, variant });
   let target = rel;
   let moves = [];
   if (name !== undefined) {
@@ -256,11 +291,12 @@ export async function updateImage(root, rel, { of, caption, name } = {}) {
     }
   }
   const created = [];
-  if (of !== undefined || caption !== undefined || moves.length) {
+  if (of !== undefined || caption !== undefined || Object.values(meta).some((v) => v !== undefined) || moves.length) {
     const current = parseNote((await readText(path.join(root, notePathOf(target)))) ?? '', path.posix.basename(target));
     const next = {
       of: of === undefined ? current.of : await checkLinks(root, of),
       caption: caption === undefined ? current.caption : String(caption).trim(),
+      meta,
     };
     created.push(...(await saveNote(root, target, next)));
   }

@@ -1,9 +1,13 @@
 // Claude prompts for codex entries: gathering a description from the
 // manuscript, refining it from lookbook images, and carrying it back into the
 // prose. They all work on one section of the entry, so reruns replace it.
+// Fixed traits are the writer's: Claude drafts them once, then only proposes.
+
+import { prose, sectionBody } from './sections.js';
 
 export const DESCRIPTION = 'Description';
 export const IMAGE_PROMPT = 'Image prompt';
+export const FIXED_TRAITS = 'Fixed traits';
 
 // Online image generators: the editor copies the prompt and opens one.
 export const IMAGE_TOOLS = [
@@ -42,7 +46,20 @@ export function gatherPrompt(entry) {
 
 ${SECTION_FORMAT}
 
+3. Don't touch a "## ${FIXED_TRAITS}" section. If the entry has none, or it has no bullets, add a line to Open questions for each visual fact that should never change between pictures: "- Proposed fixed trait: <trait>".
+
 Don't change anything in manuscript/ or outline/. In the panel, just say how many passages you used and list the open questions.`;
+}
+
+// Claude writes the entry's Fixed traits once, from its description.
+export function fixedTraitsPrompt(entry) {
+  return `Draft the fixed traits of “${entry.title}” (${entry.path}): the few visual facts that must be the same in every picture of ${entry.title}.
+
+1. Read ${entry.path}, especially its "## ${DESCRIPTION}" section and its quotes. Check anything doubtful against manuscript/.
+2. If the entry already has a "## ${FIXED_TRAITS}" section with bullets in it, don't change it. In the panel, list the traits you would add and any that conflict with the manuscript.
+3. Otherwise write the section: 4 to 8 bullets, each concrete enough to check by looking at a picture (for example "Scar across the right cheek, from jaw to ear", not "scarred"). ${entry.kind === 'location' ? 'Layout, materials, landmarks and anything that marks the place.' : 'Face, build, height next to others, hair, marks, and clothing they always wear.'} No personality, nothing that changes during the book. Fill an empty "## ${FIXED_TRAITS}" section where it is; if there's none, put it right after "## ${DESCRIPTION}" (or after the entry's opening lines).
+
+Don't change anything else in ${entry.path}, and nothing in manuscript/ or outline/.`;
 }
 
 // Claude looks at lookbook images and folds what they settle into each
@@ -62,7 +79,7 @@ For each entry:
 
 ${SECTION_FORMAT}
 
-2. Add the concrete details the image settles that the text leaves open (colors, materials, proportions, wear, light, expression) to the description prose. Keep the writer's facts: where the image contradicts the text or the manuscript, don't change the text. Add the conflict to "### Open questions" instead, naming the image.
+2. Add the concrete details the image settles that the text leaves open (colors, materials, proportions, wear, light, expression) to the description prose. Keep the writer's facts: where the image contradicts the text, the manuscript or the entry's "## ${FIXED_TRAITS}", don't change the text. Add the conflict to "### Open questions" instead, naming the image. Never edit "## ${FIXED_TRAITS}".
 3. Update "### ${IMAGE_PROMPT}" so it would produce this look again.
 4. Add the image to the section as a source: "- Image: lookbook/<file>".
 
@@ -87,17 +104,6 @@ export function imagePromptFrom(markdown) {
   const section = sectionBody(markdown, 2, DESCRIPTION);
   if (section === null) return null;
   const prompt = sectionBody(section, 3, IMAGE_PROMPT);
-  const text = (prompt ?? section.split(/^#{3,6}\s/m)[0]).trim();
+  const text = prose(prompt ?? section.split(/^#{3,6}\s/m)[0]);
   return text || null;
-}
-
-function sectionBody(markdown, level, title) {
-  const lines = String(markdown).split(/\r?\n/);
-  const heading = new RegExp(`^#{${level}}\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*#*\\s*$`, 'i');
-  const start = lines.findIndex((l) => heading.test(l));
-  if (start === -1) return null;
-  const stop = new RegExp(`^#{1,${level}}\\s`);
-  let end = start + 1;
-  while (end < lines.length && !stop.test(lines[end])) end += 1;
-  return lines.slice(start + 1, end).join('\n');
 }

@@ -275,5 +275,9 @@ The model is the revision tree in [prose-graph](https://prose-graph.lovable.app/
 4. ✅ **Back to the manuscript.** Claude suggests numbered edits without making them; the writer says which to apply.
 
 **Later.**
-- Generate images from the editor. Claude has no image generator, so this needs an outside image API called from the server, with its key in the editor's config, never in the book. Candidates: OpenAI's image models, Google's Imagen/Gemini image models, or a local Stable Diffusion/Flux server (ComfyUI) for offline use. A provider interface in `server/imagegen.js` would keep the choice swappable. Save each image's prompt in its note so it can be rerun, and keep each try as its own image so they can be compared.
+- Generate images from the editor: see §12.
 - Aliases for entries (a front-matter list), so gathering and search find every name a character goes by.
+
+## 12. A consistent world and image generation
+
+Planned in [plan/auto_lookbook.md](plan/auto_lookbook.md): a model of the world and its characters, a Stage dialog for shots, local and paid image generation, and a Claude consistency check.

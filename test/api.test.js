@@ -249,5 +249,21 @@ test('lookbook images upload, serve and show in the tree', async () => {
   const tree = await call('GET', '/api/books/sample/tree');
   assert.deepEqual(tree.data.lookbook.map((i) => [i.path, i.of]), [['lookbook/tor.png', ['codex/characters/tor.md']]]);
   assert.equal((await call('PATCH', '/api/books/sample/lookbook', { path: 'lookbook/tor.png', caption: 'Hi' })).status, 200);
+  assert.equal((await call('PATCH', '/api/books/sample/lookbook', { path: 'lookbook/tor.png', use: 'reference', view: 'face' })).status, 200);
+  const marked = await call('GET', '/api/books/sample/tree');
+  assert.deepEqual([marked.data.lookbook[0].use, marked.data.lookbook[0].view], ['reference', 'face']);
+  assert.equal((await call('PATCH', '/api/books/sample/lookbook', { path: 'lookbook/tor.png', view: 'sideways' })).status, 400);
+  // Handing images off starts a program, so it needs the page's token.
+  assert.equal((await call('POST', '/api/books/sample/handoff', { paths: ['lookbook/tor.png'] })).status, 403);
   assert.equal((await call('DELETE', '/api/books/sample/lookbook?path=lookbook/tor.png')).status, 200);
+});
+
+test('the visual style note is created on request, once', async () => {
+  const first = await call('POST', '/api/books/sample/visual-style', {});
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.data.created, ['codex/visual-style.md']);
+  const again = await call('POST', '/api/books/sample/visual-style', {});
+  assert.deepEqual(again.data.created, []);
+  const tree = await call('GET', '/api/books/sample/tree');
+  assert.ok(tree.data.codex.notes.some((n) => n.path === 'codex/visual-style.md'));
 });

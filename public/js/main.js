@@ -6,8 +6,9 @@ import { connectEvents } from './events.js';
 import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
-import { gatherPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
+import { fixedTraitsPrompt, gatherPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
 import { entryStrip, LookbookView, uploadImages } from './lookbook.js';
+import { VISUAL_STYLE } from './worldmodel.js';
 import { Pane } from './pane.js';
 import { quickOpen, quickOpenItems } from './quickopen.js';
 import { searchDialog } from './search.js';
@@ -103,6 +104,7 @@ class BookView {
         run: (fn) => this.runOp(fn),
         upload: (files, of) => this.uploadImages(files, of),
         refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path }),
+        visualStyle: () => this.openVisualStyle(),
       },
     });
     this.el.append(this.lookbook.el);
@@ -477,19 +479,26 @@ class BookView {
   // A codex entry's images and description actions, above its text.
   renderCodexStrip() {
     const path = this.main.file?.path;
-    const entry = path && codexEntries(this.tree).find((e) => e.path === path);
+    const entry = path && path !== VISUAL_STYLE && codexEntries(this.tree).find((e) => e.path === path);
     this.main.setExtra(entry ? entryStrip({
       bookId: this.id,
       tree: this.tree,
-      path,
+      entry,
       getText: () => this.main.content,
       onAdd: (files) => this.uploadImages(files, [path]),
       claude: {
         gather: () => this.askClaude(gatherPrompt(entry)),
+        traits: () => this.askClaude(fixedTraitsPrompt(entry)),
         refine: (images) => this.askClaude(refinePrompt([entry], images)),
         manuscript: () => this.askClaude(manuscriptPrompt(entry)),
       },
     }) : null);
+  }
+
+  // Opens the book's visual style note, creating it from the template first.
+  async openVisualStyle() {
+    const res = await this.runOp(() => api.addVisualStyle(this.id));
+    if (res) this.open('codex', res.path);
   }
 
   // Sends a prompt to the Claude panel, first opening `open` (a file) if

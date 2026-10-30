@@ -23,6 +23,7 @@ async function book() {
 }
 
 const read = (root, rel) => fs.readFile(path.join(root, rel), 'utf8');
+const linksOf = (text, name) => { const { of, caption } = parseNote(text, name); return { of, caption }; };
 
 test('recognizes image formats by their first bytes', () => {
   assert.equal(sniffImage(PNG), 'png');
@@ -34,16 +35,48 @@ test('recognizes image formats by their first bytes', () => {
 });
 
 test('notes read block, inline and single links, and keep other front matter', () => {
-  assert.deepEqual(parseNote('---\nof:\n  - codex/a.md\n  - "codex/b c.md"\ntags: [x]\n---\n![A](a.png)\n\nHello.\n', 'a.png'),
+  assert.deepEqual(linksOf('---\nof:\n  - codex/a.md\n  - "codex/b c.md"\ntags: [x]\n---\n![A](a.png)\n\nHello.\n', 'a.png'),
     { of: ['codex/a.md', 'codex/b c.md'], caption: 'Hello.' });
-  assert.deepEqual(parseNote('---\nof: [codex/a.md, \'codex/b.md\']\n---\nJust text', 'a.png'), { of: ['codex/a.md', 'codex/b.md'], caption: 'Just text' });
-  assert.deepEqual(parseNote('---\nof: codex/a.md\n---\n', 'a.png'), { of: ['codex/a.md'], caption: '' });
-  assert.deepEqual(parseNote('No front matter.', 'a.png'), { of: [], caption: 'No front matter.' });
+  assert.deepEqual(linksOf('---\nof: [codex/a.md, \'codex/b.md\']\n---\nJust text', 'a.png'), { of: ['codex/a.md', 'codex/b.md'], caption: 'Just text' });
+  assert.deepEqual(linksOf('---\nof: codex/a.md\n---\n', 'a.png'), { of: ['codex/a.md'], caption: '' });
+  assert.deepEqual(linksOf('No front matter.', 'a.png'), { of: [], caption: 'No front matter.' });
 
   const text = writeNote('---\ntags: [x]\nof:\n  - codex/old.md\nsource: me\n---\nold\n', { of: ['codex/a.md', 'codex/b c.md'], caption: 'New.', imageName: 'a b.png', title: 'A B' });
   assert.equal(text, '---\ntags: [x]\nof:\n  - codex/a.md\n  - codex/b c.md\nsource: me\n---\n\n![A B](<a b.png>)\n\nNew.\n');
-  assert.deepEqual(parseNote(text, 'a b.png'), { of: ['codex/a.md', 'codex/b c.md'], caption: 'New.' });
+  assert.deepEqual(linksOf(text, 'a b.png'), { of: ['codex/a.md', 'codex/b c.md'], caption: 'New.' });
   assert.equal(writeNote('', { of: [], caption: '', imageName: 'a.png', title: 'A' }), '');
+});
+
+test('notes read and write reference keys, and leave the rest alone', () => {
+  const base = '---\nof:\n  - codex/characters/tor.md\ntags: [x]\n---\n![Tor](tor.png)\n\nAt dawn.\n';
+  assert.deepEqual(parseNote(base, 'tor.png'), { of: ['codex/characters/tor.md'], caption: 'At dawn.', use: '', view: '', variant: '' });
+  const meta = { use: 'reference', view: 'face', variant: 'winter coat: torn' };
+  const marked = writeNote(base, { of: ['codex/characters/tor.md'], caption: 'At dawn.', imageName: 'tor.png', title: 'Tor', meta });
+  assert.equal(marked, '---\nof:\n  - codex/characters/tor.md\ntags: [x]\nuse: reference\nview: face\nvariant: "winter coat: torn"\n---\n\n![Tor](tor.png)\n\nAt dawn.\n');
+  assert.deepEqual(parseNote(marked, 'tor.png'), { of: ['codex/characters/tor.md'], caption: 'At dawn.', ...meta });
+  // Undefined keys stay; empty ones go.
+  const cleared = writeNote(marked, { of: ['codex/characters/tor.md'], caption: 'At dawn.', imageName: 'tor.png', title: 'Tor', meta: { view: '', variant: undefined } });
+  assert.match(cleared, /use: reference\nvariant: "winter coat: torn"\n---/);
+});
+
+test('updating an image marks it as a reference, and checks the values', async () => {
+  const root = await book();
+  const { path: img } = await addImage(root, { filename: 'tor.png', data: PNG.toString('base64'), of: ['codex/characters/tor.md'] });
+  await updateImage(root, img, { use: 'reference', view: 'face', variant: ' winter coat ' });
+  const [item] = await listLookbook(root);
+  assert.deepEqual([item.use, item.view, item.variant], ['reference', 'face', 'winter coat']);
+  // A rename and a codex rename keep the keys.
+  await renameCodexEntry(root, 'codex/characters/tor.md', { name: 'Tormund' });
+  const { path: renamed } = await updateImage(root, img, { name: 'Tormund face' });
+  const [after] = await listLookbook(root);
+  assert.deepEqual([after.path, after.of, after.use, after.view], [renamed, ['codex/characters/tormund.md'], 'reference', 'face']);
+  await updateImage(root, renamed, { use: '', view: '' });
+  const [plain] = await listLookbook(root);
+  assert.deepEqual([plain.use, plain.view, plain.variant], ['', '', 'winter coat']);
+
+  await assert.rejects(updateImage(root, renamed, { use: 'yes' }), /use/);
+  await assert.rejects(updateImage(root, renamed, { view: 'side' }), /view/);
+  await assert.rejects(updateImage(root, renamed, { variant: 'a\nb' }), /variant/);
 });
 
 test('adding an image names it from the file, sniffs its type and writes its note', async () => {

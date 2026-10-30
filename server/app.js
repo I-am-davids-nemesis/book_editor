@@ -8,11 +8,12 @@ import {
   createBook, forgetBook, getBook, getBookRoot, libraryExists, listBooks, registerBook,
 } from './books.js';
 import { ClaudeService } from './claude.js';
-import { addCodexEntry, deleteCodexEntry, renameCodexEntry } from './codex.js';
+import { addCodexEntry, addVisualStyle, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
 import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
+import { prepareHandoff } from './handoff.js';
 import {
   commitNamed, compare, createBranch, fileDiff, graph, imageAt, push, restoreBook, restoreFile, status, switchBranch,
 } from './history.js';
@@ -315,6 +316,13 @@ export function createApp({
   api.post('/books/:id/codex', structureRoute((root, req) => addCodexEntry(root, req.body)));
   api.patch('/books/:id/codex', structureRoute((root, req) => renameCodexEntry(root, req.body?.path, req.body)));
   api.delete('/books/:id/codex', structureRoute((root, req) => deleteCodexEntry(root, req.query.path)));
+  api.post('/books/:id/visual-style', structureRoute((root) => addVisualStyle(root)));
+
+  // Copies reference images to a numbered folder and opens it in Finder. It
+  // starts a program, so it needs the page's token like the Claude routes.
+  api.post('/books/:id/handoff', requireToken(token), async (req, res) => {
+    res.json(await prepareHandoff(await bookRoot(req), req.body ?? {}));
+  });
 
   // --- Claude ---
   const claudeRoutes = express.Router({ mergeParams: true });

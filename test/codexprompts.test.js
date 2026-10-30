@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { gatherPrompt, imagePromptFrom, manuscriptPrompt, refinePrompt } from '../public/js/codexprompts.js';
+import { fixedTraitsPrompt, gatherPrompt, imagePromptFrom, manuscriptPrompt, refinePrompt } from '../public/js/codexprompts.js';
 
 const tor = { path: 'codex/characters/tor.md', title: 'Tor', kind: 'character' };
 
@@ -45,4 +45,12 @@ test('prompts name the files and keep Claude out of the manuscript until asked',
   assert.match(refine, /Open questions/);
 
   assert.match(manuscriptPrompt(tor), /Don't edit any files yet/);
+  assert.match(gather, /Don't touch a "## Fixed traits" section/);
+  assert.match(refine, /Never edit "## Fixed traits"/);
+
+  const traits = fixedTraitsPrompt(tor);
+  assert.match(traits, /codex\/characters\/tor\.md/);
+  assert.match(traits, /If the entry already has a "## Fixed traits" section with bullets in it, don't change it/);
+  assert.match(traits, /Face, build/);
+  assert.match(fixedTraitsPrompt({ ...tor, kind: 'location' }), /Layout, materials/);
 });

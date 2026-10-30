@@ -83,6 +83,8 @@ export const api = {
   addImage: (id, { filename, data, of }) => request('POST', `${book(id)}/lookbook`, { filename, data, of }),
   updateImage: (id, path, changes) => request('PATCH', `${book(id)}/lookbook`, { path, ...changes }),
   deleteImage: (id, path) => request('DELETE', `${book(id)}/lookbook?path=${encodeURIComponent(path)}`),
+  handoff: (id, paths, name) => request('POST', `${book(id)}/handoff`, { paths, name }),
+  addVisualStyle: (id) => request('POST', `${book(id)}/visual-style`, {}),
 
   addCodex: (id, kind, name) => request('POST', `${book(id)}/codex`, { kind, name }),
   renameCodex: (id, path, name) => request('PATCH', `${book(id)}/codex`, { path, name }),

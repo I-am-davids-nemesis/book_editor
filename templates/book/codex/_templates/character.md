@@ -6,6 +6,12 @@ One sentence: who they are, and the pressure every scene with them should test.
 
 -
 
+## Fixed traits
+
+<!-- What must look the same in every picture: face, build, height next to others, hair, marks (and which side), clothing they always wear. One per line; image prompts include these word for word. -->
+
+-
+
 ## Profile
 
 - **Role:** who they are to the protagonist and to the plot.
