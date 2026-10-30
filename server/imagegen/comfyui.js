@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { HttpError } from '../errors.js';
@@ -28,6 +29,31 @@ function openApp(name) {
   return new Promise((resolve, reject) => {
     execFile('open', ['-a', name], (err, stdout, stderr) => (err ? reject(Object.assign(err, { stderr: String(stderr) })) : resolve()));
   });
+}
+
+// Runs a start script (no shell, no arguments) in the background, writing
+// its output to `logFile`. ComfyUI keeps running if the editor stops.
+// Resolves once it has started: { exited: () => exit code or null }.
+function runScript(command, logFile) {
+  return new Promise((resolve, reject) => {
+    fsSync.mkdirSync(path.dirname(logFile), { recursive: true });
+    const out = fsSync.openSync(logFile, 'w');
+    let code = null;
+    const child = spawn(command, [], { detached: true, stdio: ['ignore', out, out] });
+    child.once('error', (err) => { fsSync.closeSync(out); reject(err); });
+    child.once('exit', (c, signal) => { code = c ?? signal; });
+    child.once('spawn', () => {
+      fsSync.closeSync(out);
+      child.unref();
+      resolve({ exited: () => code });
+    });
+  });
+}
+
+// The last lines of a log, for an error message.
+async function logTail(file, lines = 6) {
+  const text = await fs.readFile(file, 'utf8').catch(() => '');
+  return text.trim().split('\n').slice(-lines).join('\n');
 }
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const CHECK_TIMEOUT_MS = 3000;
@@ -62,9 +88,11 @@ function promptError(data) {
 
 export class ComfyUIProvider {
   //   url: where ComfyUI is, or null to look on the usual ports
-  //   app: the Mac app Start opens   unloadAfterMs: idle time before the model is unloaded (0: never)
+  //   app: the Mac app Start opens, unless there's a `startScript` (an
+  //   absolute path) to run instead; its output goes to `logFile`
+  //   unloadAfterMs: idle time before the model is unloaded (0: never)
   constructor({
-    url = null, urls = DEFAULT_URLS, app = 'ComfyUI', unloadAfterMs = 10 * 60 * 1000, workflowsDir = WORKFLOWS_DIR, pollMs = 1000,
+    url = null, urls = DEFAULT_URLS, app = 'ComfyUI', startScript = null, logFile = null, unloadAfterMs = 10 * 60 * 1000, workflowsDir = WORKFLOWS_DIR, pollMs = 1000,
     fetch = globalThis.fetch, WebSocket = globalThis.WebSocket, launch = openApp, platform = process.platform,
   } = {}) {
     this.id = 'comfyui';
@@ -72,8 +100,11 @@ export class ComfyUIProvider {
     this.urls = url ? [url] : urls;
     this.url = this.urls[0];
     this.app = app;
+    this.startScript = startScript;
+    this.logFile = logFile;
     this.unloadAfterMs = unloadAfterMs;
     this.launch = launch;
+    this.run = runScript;
     this.platform = platform;
     this.workflowsDir = workflowsDir;
     this.pollMs = pollMs;
@@ -110,30 +141,52 @@ export class ComfyUIProvider {
   }
 
   get canStart() {
-    return this.platform === 'darwin';
+    return Boolean(this.startScript) || this.platform === 'darwin';
   }
 
-  // Opens the ComfyUI app and waits until it answers; returns check().
+  // Starts ComfyUI (its start script, or the Mac app) and waits until it
+  // answers; returns check().
   async start({ timeoutMs = START_TIMEOUT_MS, pollMs = 1000 } = {}) {
-    if (!this.canStart) throw new HttpError(501, 'Starting ComfyUI from the editor only works on a Mac; start it yourself');
+    if (!this.canStart) throw new HttpError(501, 'Starting ComfyUI from the editor needs a Mac, or imagegen.comfyui.start in the config; start it yourself');
     try {
       await this.locate();
       return this.check();
     } catch {
       // not running yet
     }
-    try {
-      await this.launch(this.app);
-    } catch (err) {
-      throw new HttpError(404, `Couldn’t open the ${this.app} app${err.stderr?.includes('Unable to find') ? ': it isn’t installed' : ''}. Install ComfyUI Desktop, or set imagegen.comfyui.app in the config to its name.`);
+    let what;
+    let exited = () => null;
+    if (this.startScript) {
+      what = this.startScript;
+      if (!path.isAbsolute(this.startScript)) throw new HttpError(400, `imagegen.comfyui.start must be an absolute path, not ${this.startScript}`);
+      try {
+        await fs.access(this.startScript, fsSync.constants.X_OK);
+        ({ exited } = await this.run(this.startScript, this.logFile));
+      } catch (err) {
+        throw new HttpError(404, `Couldn’t run ${this.startScript}: ${err.code === 'ENOENT' ? 'no such file' : err.code === 'EACCES' ? 'it isn’t executable (chmod +x it)' : err.message}`);
+      }
+    } else {
+      what = `The ${this.app} app`;
+      try {
+        await this.launch(this.app);
+      } catch (err) {
+        throw new HttpError(404, `Couldn’t open the ${this.app} app${err.stderr?.includes('Unable to find') ? ': it isn’t installed' : ''}. Install ComfyUI Desktop, or set imagegen.comfyui.app or imagegen.comfyui.start in the config.`);
+      }
     }
     const until = Date.now() + timeoutMs;
     for (;;) {
       try {
         await this.locate();
         return this.check();
-      } catch (err) {
-        if (Date.now() > until) throw new HttpError(504, `${this.app} opened, but ComfyUI didn’t answer at ${this.where} within ${Math.round(timeoutMs / 1000)} seconds. It may still be starting; check again in a minute.`);
+      } catch {
+        // A script that stops with an error won't start ComfyUI. (One that
+        // exits cleanly may have started it in the background.)
+        const code = exited();
+        if (code !== null && code !== 0) {
+          const tail = this.logFile ? await logTail(this.logFile) : '';
+          throw new HttpError(502, `${this.startScript} stopped (exit ${code}) before ComfyUI answered.${tail ? ` Its last output: ${tail}` : ''}${this.logFile ? ` (full log: ${this.logFile})` : ''}`);
+        }
+        if (Date.now() > until) throw new HttpError(504, `${what} started, but ComfyUI didn’t answer at ${this.where} within ${Math.round(timeoutMs / 1000)} seconds. It may still be starting; check again in a minute.${this.logFile && this.startScript ? ` Its log: ${this.logFile}` : ''}`);
         await sleep(pollMs);
       }
     }

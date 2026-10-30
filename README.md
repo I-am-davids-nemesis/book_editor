@@ -133,12 +133,12 @@ FLUX.2 [klein] takes up to 4 reference images, so Stage lowers **Up to** to 4 wh
 
 ```json
 "imagegen": {
-  "comfyui": { "url": "http://127.0.0.1:8188", "app": "ComfyUI", "unloadAfterMinutes": 10 },
+  "comfyui": { "url": "http://127.0.0.1:8188", "app": "ComfyUI", "start": "~/workspace/start_comfy.sh", "unloadAfterMinutes": 10 },
   "fake": true
 }
 ```
 
-`url` pins ComfyUI to one address (it must be on this machine), `app` is the Mac app **Start** opens, `unloadAfterMinutes: 0` keeps the model loaded, and `fake` adds a test-pattern generator for trying all this without a model.
+`url` pins ComfyUI to one address (it must be on this machine). `app` is the Mac app **Start** opens. For a manual install (a ComfyUI folder and its own Python environment, run with `python main.py`), set `start` to a script that starts it instead: **Start** runs it in the background, its output goes to `comfyui.log` beside the config, and if it stops with an error the editor shows its last lines. ComfyUI keeps running when the editor stops. `unloadAfterMinutes: 0` keeps the model loaded, and `fake` adds a test-pattern generator for trying all this without a model.
 
 **Candidates.** Generated pictures don't go straight into the book. They wait in the Lookbook's **Candidates** view, grouped by shot, newest first:
 

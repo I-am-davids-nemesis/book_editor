@@ -307,6 +307,37 @@ test('Start opens the app and waits for ComfyUI; Unload frees its memory', async
   await assert.rejects(new ComfyUIProvider({ url, platform: 'linux' }).start(), (err) => err.status === 501);
 });
 
+test('Start can run a start script instead, and reports one that fails', async (t) => {
+  const { app, state } = fakeComfy();
+  const { server, url } = await listen(app);
+  t.after(() => server.close());
+  const dir = await tempDir();
+  const logFile = path.join(dir, 'logs', 'comfyui.log');
+  const script = async (name, body, mode = 0o755) => {
+    const file = path.join(dir, name);
+    await fs.writeFile(file, `#!/bin/sh\n${body}\n`, { mode });
+    return file;
+  };
+
+  state.down = true;
+  const ok = await script('ok.sh', 'echo starting ComfyUI\nsleep 0.3');
+  setTimeout(() => { state.down = false; }, 50);
+  const result = await new ComfyUIProvider({ url, startScript: ok, logFile, platform: 'linux', WebSocket: null }).start({ pollMs: 10 });
+  assert.equal(result.ok, true);
+  await new Promise((r) => setTimeout(r, 100)); // the script's echo can land after ComfyUI answers
+  assert.match(await fs.readFile(logFile, 'utf8'), /starting ComfyUI/);
+
+  state.down = true;
+  const bad = await script('bad.sh', 'echo "ModuleNotFoundError: No module named torch" >&2\nexit 3');
+  await assert.rejects(
+    new ComfyUIProvider({ url, startScript: bad, logFile, WebSocket: null }).start({ pollMs: 10, timeoutMs: 5000 }),
+    (err) => err.status === 502 && /exit 3/.test(err.message) && /No module named torch/.test(err.message),
+  );
+  const plain = await script('plain.sh', 'exit 0', 0o644);
+  await assert.rejects(new ComfyUIProvider({ url, startScript: plain, logFile }).start({ pollMs: 10 }), /isn’t executable/);
+  await assert.rejects(new ComfyUIProvider({ url, startScript: 'start.sh', logFile }).start({ pollMs: 10 }), /absolute path/);
+});
+
 // --- candidates ------------------------------------------------------------------------
 
 const MADE = { provider: 'fake', model: 'pattern', seed: 3, prompt: 'Tor.', references: [], shot: { characters: [{ path: 'codex/characters/tor.md', variant: '' }] } };
