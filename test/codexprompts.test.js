@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { gatherPrompt, imagePromptFrom, manuscriptPrompt, refinePrompt } from '../public/js/codexprompts.js';
+
+const tor = { path: 'codex/characters/tor.md', title: 'Tor', kind: 'character' };
+
+test('the image prompt comes from the Description section', () => {
+  const entry = `# Tor
+
+A washer.
+
+## Description
+
+Tall and stooped, with a pale scar.
+
+### Image prompt
+
+A tall stooped man at a stone well at dawn, pale scar across one cheek.
+
+### From the manuscript
+
+- “his scar pale” (manuscript/01-a/01-b.md)
+
+## Facts
+
+- Born in the yard.
+`;
+  assert.equal(imagePromptFrom(entry), 'A tall stooped man at a stone well at dawn, pale scar across one cheek.');
+  // Without an Image prompt, the description prose stands in.
+  assert.equal(imagePromptFrom(entry.replace(/### Image prompt\n\n.*\n\n/, '')), 'Tall and stooped, with a pale scar.');
+  assert.equal(imagePromptFrom('# Tor\n\nNo description yet.\n'), null);
+  assert.equal(imagePromptFrom('# Tor\n\n## Description\n\n## Facts\n'), null);
+});
+
+test('prompts name the files and keep Claude out of the manuscript until asked', () => {
+  const gather = gatherPrompt(tor);
+  assert.match(gather, /codex\/characters\/tor\.md/);
+  assert.match(gather, /## Description/);
+  assert.match(gather, /### Image prompt/);
+  assert.match(gather, /Don't change anything in manuscript\//);
+
+  const refine = refinePrompt([tor], [{ path: 'lookbook/tor.png', title: 'Tor' }]);
+  assert.match(refine, /Read tool/);
+  assert.match(refine, /lookbook\/tor\.png/);
+  assert.match(refine, /Open questions/);
+
+  assert.match(manuscriptPrompt(tor), /Don't edit any files yet/);
+});

@@ -6,12 +6,14 @@ import { connectEvents } from './events.js';
 import { openRevisionPanel } from './gitpanel.js';
 import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
+import { gatherPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
+import { entryStrip, LookbookView, uploadImages } from './lookbook.js';
 import { Pane } from './pane.js';
 import { quickOpen, quickOpenItems } from './quickopen.js';
 import { searchDialog } from './search.js';
 import { installShortcuts, showShortcutHelp } from './shortcuts.js';
 import {
-  availableModes, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
+  availableModes, codexEntries, companionOf, findScene, modeLabel, renderTree, sceneFile, sceneFiles, setFileWords, tabForPath,
 } from './tree.js';
 import { bookHref, formatCount, h, parseHash, showMenu, toast } from './ui.js';
 
@@ -94,6 +96,17 @@ class BookView {
     });
     this.el.append(this.history.el);
 
+    this.lookbook = new LookbookView({
+      bookId: id,
+      actions: {
+        back: () => this.open(this.tab, this.file?.path),
+        run: (fn) => this.runOp(fn),
+        upload: (files, of) => this.uploadImages(files, of),
+        refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path }),
+      },
+    });
+    this.el.append(this.lookbook.el);
+
     this.claude = new ClaudePanel({
       bookId: id,
       getContext: () => this.claudeContext(),
@@ -107,6 +120,7 @@ class BookView {
     this.claudeBtn = h('button', { type: 'button', class: 'claude-btn', title: 'Claude Code in this book (⌘⌥C)', onclick: () => this.toggleClaude() }, 'Claude');
     this.searchBtn = h('button', { type: 'button', class: 'search-btn', title: 'Search the whole book (⌘⇧F)', onclick: () => this.search() }, 'Search');
     this.historyBtn = h('button', { type: 'button', class: 'history-btn', onclick: () => this.openHistory() }, 'History');
+    this.lookbookBtn = h('button', { type: 'button', class: 'lookbook-btn', title: 'Images of characters, places and things', onclick: () => this.openLookbook() }, 'Lookbook');
     this.draftBtn = h('button', {
       type: 'button',
       class: 'draft-btn',
@@ -126,7 +140,7 @@ class BookView {
     [this.book, this.tree] = await Promise.all([api.getBook(this.id), api.getTree(this.id)]);
     crumb.textContent = this.book.title;
     document.title = `${this.book.title} · Book Editor`;
-    topbarActions.replaceChildren(this.draftBtn, this.searchBtn, this.historyBtn, this.claudeBtn);
+    topbarActions.replaceChildren(this.draftBtn, this.searchBtn, this.lookbookBtn, this.historyBtn, this.claudeBtn);
     if (readStored('claude') === 'open') this.toggleClaude(true);
     else this.claudeBtn.setAttribute('aria-pressed', 'false');
     this.mode = this.validMode(readStored(`mode:${this.id}`));
@@ -184,8 +198,9 @@ class BookView {
       const change = batch.resync ? { path } : foreign.find((f) => f.path === path);
       if (change) await pane.externalChange(change);
     }
-    const manuscriptChanged = foreign.some((f) => f.path.startsWith('manuscript/'));
-    if (batch.tree || manuscriptChanged) {
+    // Lookbook notes carry an image's links, which the tree reports.
+    const treeChanged = foreign.some((f) => f.path.startsWith('manuscript/') || f.path.startsWith('lookbook/'));
+    if (batch.tree || treeChanged) {
       await this.refreshTree();
       // A missing plot or scene file may have appeared.
       if (!this.side.file && !this.side.readOnly) await this.syncSide();
@@ -294,6 +309,8 @@ class BookView {
   async route({ tab, path }) {
     // A draft switch or restore is rewriting files; let it finish first.
     if (this.busy) await this.busy.catch(() => {});
+    this.showLookbook(tab === 'lookbook', path);
+    if (tab === 'lookbook') return;
     if (tab === 'history') {
       // `path` here is a commit hash, if any.
       this.el.classList.add('show-history');
@@ -326,9 +343,13 @@ class BookView {
     await this.syncSide();
     this.updateStatus();
     this.claude.refreshContext();
+    this.renderCodexStrip();
     if (changed && path) this.main.focus();
     if (this.pendingReveal && this.pendingReveal.path === this.main.file?.path) this.main.reveal(this.pendingReveal);
     this.pendingReveal = null;
+    const after = this.afterRoute;
+    this.afterRoute = null;
+    after?.();
   }
 
   // The main pane with no file: a nudge for an empty book, tips otherwise.
@@ -369,6 +390,8 @@ class BookView {
       if (pane.dirty) setFileWords(this.tree, pane.file.path, pane.words);
     }
     this.renderTree();
+    this.lookbook.update(this.tree);
+    this.renderCodexStrip();
   }
 
   open(tab, path) {
@@ -389,7 +412,7 @@ class BookView {
     await this.save();
     const hit = await searchDialog({ bookId: this.id, tree: this.tree });
     if (!hit) return;
-    if (this.main.file?.path === hit.path && !this.el.classList.contains('show-history')) {
+    if (this.main.file?.path === hit.path && !this.el.matches('.show-history, .show-lookbook')) {
       this.main.reveal(hit);
     } else {
       this.pendingReveal = hit;
@@ -431,6 +454,63 @@ class BookView {
     return true;
   }
 
+  // --- lookbook ------------------------------------------------------------------
+
+  openLookbook() {
+    location.hash = bookHref(this.id, 'lookbook');
+  }
+
+  // Shows or hides the Lookbook in place of the panes; `path` is the image
+  // to show in detail.
+  showLookbook(show, path = null) {
+    this.el.classList.toggle('show-lookbook', show);
+    this.lookbookBtn.setAttribute('aria-pressed', String(show));
+    if (show) this.lookbook.show(this.tree, path);
+    else this.lookbook.hide();
+  }
+
+  // Adds images to the lookbook, linked to the codex entries in `of`.
+  uploadImages(files, of = []) {
+    return this.runOp(() => uploadImages(this.id, files, { of }));
+  }
+
+  // A codex entry's images and description actions, above its text.
+  renderCodexStrip() {
+    const path = this.main.file?.path;
+    const entry = path && codexEntries(this.tree).find((e) => e.path === path);
+    this.main.setExtra(entry ? entryStrip({
+      bookId: this.id,
+      tree: this.tree,
+      path,
+      getText: () => this.main.content,
+      onAdd: (files) => this.uploadImages(files, [path]),
+      claude: {
+        gather: () => this.askClaude(gatherPrompt(entry)),
+        refine: (images) => this.askClaude(refinePrompt([entry], images)),
+        manuscript: () => this.askClaude(manuscriptPrompt(entry)),
+      },
+    }) : null);
+  }
+
+  // Sends a prompt to the Claude panel, first opening `open` (a file) if
+  // given, so the panel's context matches what the run is about.
+  askClaude(prompt, { open = null } = {}) {
+    if (this.claude.runId) {
+      toast('Claude is still working on the last request; stop it or wait, then try again', { error: true });
+      return;
+    }
+    const send = () => {
+      this.toggleClaude(true);
+      this.claude.send(prompt);
+    };
+    if (open && (this.file?.path !== open || this.el.matches('.show-history, .show-lookbook'))) {
+      this.afterRoute = send;
+      this.open(tabForPath(open), open);
+    } else {
+      send();
+    }
+  }
+
   // --- history -------------------------------------------------------------------
 
   // Opens History, optionally showing only one file's commits.
@@ -452,7 +532,7 @@ class BookView {
       try {
         await this.main.open(path);
         this.missingPath = null;
-        if (location.hash !== bookHref(this.id, this.tab, path) && !this.el.classList.contains('show-history')) {
+        if (location.hash !== bookHref(this.id, this.tab, path) && !this.el.matches('.show-history, .show-lookbook')) {
           history.replaceState(null, '', bookHref(this.id, this.tab, path));
         }
       } catch {
@@ -476,7 +556,7 @@ class BookView {
       return;
     }
     this.revisionView = { path, rev, content, label };
-    if (this.file?.path === path && !this.el.classList.contains('show-history')) await this.syncSide();
+    if (this.file?.path === path && !this.el.matches('.show-history, .show-lookbook')) await this.syncSide();
     else this.open(tabForPath(path), path);
   }
 
@@ -961,6 +1041,8 @@ class BookView {
       setMode: (mode) => this.setMode(mode),
 
       history: (path) => this.openHistory(path),
+
+      lookbook: () => this.openLookbook(),
 
       compile: async (chapter = null) => {
         if (!(await this.save())) return;

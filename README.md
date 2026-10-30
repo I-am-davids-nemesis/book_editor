@@ -78,6 +78,43 @@ A scene can exist in several modes as `01-opening.camera.md`, `01-opening.rotati
 - **Match case**, **Whole words** and the scope menu (Whole book, Manuscript, Outline, Codex) narrow it. The search is plain text, and straight and curly quotes match each other, so `don't` finds `don’t`.
 - `compiled/` and hidden folders such as `.obsidian` are skipped. The dialog remembers your last search until you reload the page.
 
+## Lookbook
+
+The lookbook holds pictures of your characters, places and things, each linked to the codex entries it shows. An image can show several entries, and an entry can have many images.
+
+- **Lookbook** in the top bar (or in the Codex tab) opens it: every image as a grid. The menu at the top filters it to one entry's images, or to images not linked to anything.
+- **+ Add images**, or drop image files anywhere on the page. If the view is filtered to an entry, new images are linked to it. PNG, JPEG, GIF, WebP and AVIF work, up to 14 MB each.
+- Click an image to see it large, link or unlink codex entries, write a caption, rename it or delete it. Esc closes it.
+- An open codex entry shows its images in a strip above the text. Drop images on the strip, or use **+**, to add images already linked to that entry. The sidebar shows each entry's first image beside its name.
+- Renaming a codex entry keeps its images linked. Deleting one leaves its images in the lookbook, unlinked.
+- History shows changed images side by side (before and after), and **Restore this version** works for them too.
+
+### Descriptions and images with Claude
+
+An open codex entry has two menus above its text:
+
+- **Claude ▾ → Gather a description from the manuscript.** Claude finds every passage that describes the entry (in every chapter and mode) and writes a `## Description` section into it. The section has the consolidated description, an **Image prompt**, the quotes it used with their scene files, and open questions such as contradictions. Running it again replaces the section.
+- **Image prompt ▾** copies that prompt and opens ChatGPT or Gemini in a new tab. Paste it there, download the picture you like, and drop it on the entry's image strip. It's added to the lookbook already linked to the entry.
+- **Claude ▾ → Refine the description from its images.** Claude looks at the entry's images and adds the details they settle (colors, materials, wear, expression) to the description. Where a picture contradicts the manuscript, Claude lists the conflict under Open questions instead of changing anything, and it updates the image prompt to match. In the Lookbook, **Refine descriptions from this image** does the same for one image and every entry it's linked to.
+- **Claude ▾ → Suggest manuscript edits from the description.** Claude lists numbered suggestions (file, original sentence, revised sentence) without changing anything. Reply in the panel with the ones to apply.
+
+Each of these is an ordinary Claude run: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
+
+On disk, images live in `lookbook/`. Each linked or captioned image has a note beside it with the same name (`lookbook/tor-at-the-well.md`), which lists the entries it shows under `of:` and holds the caption. The note also embeds the image, so it reads well in Obsidian:
+
+```markdown
+---
+of:
+  - codex/characters/tor.md
+---
+
+![Tor at the Well](tor-at-the-well.jpg)
+
+Dawn, before the washing starts.
+```
+
+Images are committed to git like everything else, so large ones make the repository grow.
+
 ## Saving and versions
 
 - **Saving.** Edits save to disk about a second after you stop typing, and at least every 5 seconds while you keep typing. **⌘S** saves at once.

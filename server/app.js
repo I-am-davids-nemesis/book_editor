@@ -14,9 +14,11 @@ import { configPath, loadConfig } from './config.js';
 import { HttpError } from './errors.js';
 import { readBookFile, writeBookFile } from './files.js';
 import {
-  commitNamed, compare, createBranch, fileDiff, graph, push, restoreBook, restoreFile, status, switchBranch,
+  commitNamed, compare, createBranch, fileDiff, graph, imageAt, push, restoreBook, restoreFile, status, switchBranch,
 } from './history.js';
 import { buildImportMap } from './importmap.js';
+import { addImage, deleteImage, IMAGE_TYPES, isImagePath, updateImage } from './lookbook.js';
+import { resolveInBook } from './paths.js';
 import { serialized } from './queue.js';
 import { searchBook } from './search.js';
 import {
@@ -161,6 +163,21 @@ export function createApp({
     res.json(result);
   });
 
+  // Images in the book, for <img> tags. SVG isn't served: it can carry script.
+  api.get('/books/:id/image', async (req, res) => {
+    const rel = req.query.path;
+    if (typeof rel !== 'string' || !isImagePath(rel)) throw new HttpError(400, 'Not an image path');
+    const root = await bookRoot(req);
+    const abs = await resolveInBook(root, rel);
+    res.set({ 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+    res.type(IMAGE_TYPES[path.extname(abs).slice(1).toLowerCase()]);
+    // ?rev=<commit>: the image as it was then (History).
+    if (req.query.rev) return res.send(await imageAt(root, { rev: req.query.rev, path: rel }));
+    res.sendFile(abs, { dotfiles: 'deny' }, (err) => {
+      if (err && !res.headersSent) res.status(err.status === 404 || err.code === 'ENOENT' ? 404 : 500).json({ error: `No such image: ${rel}` });
+    });
+  });
+
   api.get('/books/:id/search', async (req, res) => {
     const { q, case: caseSensitive, word, scope } = req.query;
     res.json(await searchBook(await bookRoot(req), {
@@ -290,6 +307,10 @@ export function createApp({
     ? reorderScenes(root, req.body.chapter, req.body)
     : reorderChapters(root, req.body))));
   api.post('/books/:id/create-missing', structureRoute((root, req) => createMissing(root, req.body?.path)));
+
+  api.post('/books/:id/lookbook', structureRoute((root, req) => addImage(root, req.body)));
+  api.patch('/books/:id/lookbook', structureRoute((root, req) => updateImage(root, req.body?.path, req.body)));
+  api.delete('/books/:id/lookbook', structureRoute((root, req) => deleteImage(root, req.query.path)));
 
   api.post('/books/:id/codex', structureRoute((root, req) => addCodexEntry(root, req.body)));
   api.patch('/books/:id/codex', structureRoute((root, req) => renameCodexEntry(root, req.body?.path, req.body)));

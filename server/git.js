@@ -4,11 +4,12 @@ import path from 'node:path';
 import { conflict, HttpError } from './errors.js';
 
 // Every call goes through execFile with an argument list, never a shell string.
-export function git(root, args, { env } = {}) {
+// `encoding: 'buffer'` returns stdout as bytes (for images).
+export function git(root, args, { env, encoding = 'utf8' } = {}) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd: root, env, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd: root, env, encoding, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-        const message = (stderr || err.message).trim();
+        const message = (String(stderr) || err.message).trim();
         const command = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '-c') ?? args[0];
         reject(Object.assign(new HttpError(500, `git ${command}: ${message}`), { stdout, stderr, code: err.code }));
       } else {

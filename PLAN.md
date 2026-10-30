@@ -260,3 +260,20 @@ The model is the revision tree in [prose-graph](https://prose-graph.lovable.app/
 - Auto-commits go to whichever draft is current.
 - Merging drafts is left for later. Until then, you bring a draft's changes back by restoring individual files.
 
+## 11. Lookbook
+
+**Built.** Images live in `lookbook/`. Each linked or captioned image has a note with the same base name: front matter `of:` lists the codex paths it shows, then an embed of the image (so the note shows its picture in Obsidian), then the caption. Other front matter keys are kept when the editor rewrites the note. Two images can't share a base name, because they would share a note.
+
+- Server: `server/lookbook.js` lists images (they're in the tree as `tree.lookbook`), adds them (base64 JSON, since bodies must be JSON; the format is detected from the bytes and sets the extension), updates links, caption and name, and deletes them. Renaming or deleting a codex entry rewrites the notes that link to it. `GET /books/:id/image?path=[&rev=]` serves images, including as they were at a commit. SVG isn't accepted, because it can carry script.
+- UI: a full-width Lookbook view (like History) at `#/book/<id>/lookbook[/<image>]`, a thumbnail strip above an open codex entry, and thumbnails in the sidebar. History shows images before and after instead of a word diff, and restores them byte for byte.
+
+**Descriptions (built).** A loop between prose, codex and pictures, run through the Claude panel (§9), so each step is a reviewable, undoable run. The prompts are in `public/js/codexprompts.js`. They all work on one `## Description` section of the entry (prose, `### Image prompt`, `### From the manuscript`, `### Open questions`), so reruns replace it.
+
+1. ✅ **Gather a description from the manuscript.** From the entry's **Claude ▾** menu.
+2. ✅ **Generate an image, by hand.** **Image prompt ▾** copies the prompt and opens ChatGPT or Gemini. The image comes back by dropping it on the entry's strip, which links it.
+3. ✅ **Refine from images.** Claude reads the image files with its Read tool (it sees images) and adds what they settle to the description. Conflicts with the manuscript go to Open questions, not into the text.
+4. ✅ **Back to the manuscript.** Claude suggests numbered edits without making them; the writer says which to apply.
+
+**Later.**
+- Generate images from the editor. Claude has no image generator, so this needs an outside image API called from the server, with its key in the editor's config, never in the book. Candidates: OpenAI's image models, Google's Imagen/Gemini image models, or a local Stable Diffusion/Flux server (ComfyUI) for offline use. A provider interface in `server/imagegen.js` would keep the choice swappable. Save each image's prompt in its note so it can be rerun, and keep each try as its own image so they can be compared.
+- Aliases for entries (a front-matter list), so gathering and search find every name a character goes by.

@@ -2,7 +2,7 @@ import { api } from './api.js';
 import { confirmDialog } from './dialogs.js';
 import { fileRow, groupFiles } from './gitpanel.js';
 import { buildNodes, layoutGraph } from './graph.js';
-import { formatCount, h, toast } from './ui.js';
+import { formatCount, h, imageSrc, toast } from './ui.js';
 
 const ROW_H = 48;
 const LANE_W = 14;
@@ -445,6 +445,10 @@ export class HistoryView {
     }
     const atCommit = range.to !== 'worktree';
     const label = atCommit ? this.versionLabel(range) : '';
+    if (d.image) {
+      this.showImage(f, d, { back, atCommit, label });
+      return;
+    }
     const actions = h('div', { class: 'detail-actions' },
       atCommit && d.after !== null ? h('button', {
         type: 'button',
@@ -464,6 +468,25 @@ export class HistoryView {
       actions,
       d.before === null ? h('p', { class: 'muted' }, 'New file.') : d.after === null ? h('p', { class: 'muted' }, 'Deleted.') : null,
       renderDiff(d.hunks));
+  }
+
+  // Images aren't diffed: the version before and after, side by side.
+  showImage(f, d, { back, atCommit, label }) {
+    const figure = (caption, src) => h('figure', { class: 'image-version' },
+      src ? h('img', { src, alt: caption }) : h('div', { class: 'image-none muted' }, 'None'),
+      h('figcaption', { class: 'muted' }, caption));
+    const before = d.hasBefore ? imageSrc(this.bookId, { path: d.fromPath }, d.from) : null;
+    const after = !d.hasAfter ? null
+      : atCommit ? imageSrc(this.bookId, { path: d.path }, d.to) : imageSrc(this.bookId, { path: d.path, mtime: Date.now() });
+    this.detailEl.replaceChildren(
+      h('div', { class: 'detail-nav' }, back, h('strong', { class: 'diff-path' }, f.from ? `${f.from} → ${f.path}` : f.path)),
+      h('div', { class: 'detail-actions' },
+        atCommit && d.hasAfter ? h('button', { type: 'button', onclick: () => this.restoreFile(f.path, d.to, label) }, 'Restore this version…') : null,
+        atCommit && !d.hasAfter && d.hasBefore && d.from ? h('button', {
+          type: 'button',
+          onclick: () => this.restoreFile(f.from ?? f.path, d.from, 'the version before it was deleted'),
+        }, 'Bring back the deleted image…') : null),
+      h('div', { class: 'image-versions' }, figure('Before', before), figure(atCommit ? 'After' : 'Now', after)));
   }
 
   versionLabel(range) {

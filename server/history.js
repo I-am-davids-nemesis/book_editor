@@ -5,6 +5,7 @@ import { countWords } from '../public/js/wordcount.js';
 import { checkpoint } from './autocommit.js';
 import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { git, isRepo } from './git.js';
+import { isImagePath } from './lookbook.js';
 import { resolveInBook, toRel } from './paths.js';
 import { serialized } from './queue.js';
 
@@ -310,6 +311,22 @@ export async function fileDiff(root, { from, to, path: rel, from_path: fromPath 
   const { fromRev, toRev } = await resolveRange(root, from, to);
   const filePath = toRel(root, await resolveInBook(root, rel));
   const oldPath = fromPath ? toRel(root, await resolveInBook(root, fromPath)) : filePath;
+  if (isImagePath(filePath)) {
+    // Images aren't diffed; History shows them side by side.
+    const at = async (rev, p) => (rev === WORKTREE
+      ? fs.access(path.join(root, p)).then(() => true, () => false)
+      : (await fileAt(root, rev, p, { encoding: 'buffer' })) !== null);
+    return {
+      path: filePath,
+      from: fromRev === EMPTY_TREE ? null : fromRev,
+      to: toRev,
+      image: true,
+      fromPath: oldPath,
+      hasBefore: await at(fromRev, oldPath),
+      hasAfter: await at(toRev, filePath),
+      hunks: [],
+    };
+  }
   const before = await fileAt(root, fromRev, oldPath);
   const after = toRev === WORKTREE ? await readWorktree(root, filePath) : await fileAt(root, toRev, filePath);
   let hunks;
@@ -341,13 +358,24 @@ async function readWorktree(root, rel) {
   }
 }
 
-export async function fileAt(root, rev, rel) {
+export async function fileAt(root, rev, rel, { encoding } = {}) {
   if (rev === EMPTY_TREE) return null;
   try {
-    return await g(root, ['show', `${rev}:${rel}`]);
+    return await g(root, ['show', `${rev}:${rel}`], { encoding });
   } catch {
     return null; // not in that commit
   }
+}
+
+// An image's bytes as it was at `rev`, for History.
+export async function imageAt(root, { rev, path: rel }) {
+  await requireRepo(root);
+  checkRev(rev, 'commit');
+  await verifyCommit(root, rev);
+  const filePath = toRel(root, await resolveInBook(root, rel));
+  const bytes = await fileAt(root, rev, filePath, { encoding: 'buffer' });
+  if (bytes === null) throw notFound(`${filePath} did not exist in that revision`);
+  return bytes;
 }
 
 async function diffTexts(root, a, b) {
@@ -380,7 +408,8 @@ export function restoreFile(root, { rev, path: rel }) {
     await verifyCommit(root, rev);
     const abs = await resolveInBook(root, rel);
     const filePath = toRel(root, abs);
-    const content = await fileAt(root, rev, filePath);
+    // As bytes, so images come back intact.
+    const content = await fileAt(root, rev, filePath, { encoding: 'buffer' });
     if (content === null) throw notFound(`${filePath} did not exist in that revision`);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, content);

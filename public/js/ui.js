@@ -30,6 +30,13 @@ export function formatCount(n) {
   return n.toLocaleString();
 }
 
+// The URL of a lookbook image ({ path, mtime }); the mtime makes a replaced
+// image load fresh. `rev` gives the image as it was in that commit.
+export function imageSrc(bookId, { path, mtime }, rev) {
+  const q = new URLSearchParams({ path, ...(rev ? { rev } : { v: String(mtime ?? '') }) });
+  return `/api/books/${encodeURIComponent(bookId)}/image?${q}`;
+}
+
 // Hash routes: #/  and  #/book/<id>[/<tab>[/<path...>]]
 export function bookHref(id, tab, path) {
   let href = `#/book/${encodeURIComponent(id)}`;

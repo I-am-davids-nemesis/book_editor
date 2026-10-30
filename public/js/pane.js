@@ -48,12 +48,13 @@ export class Pane {
       h('span', { class: 'segmented view-switch', role: 'group', 'aria-label': 'View' }, this.viewButtons),
       this.saveBtn);
     this.bannerEl = h('div', { class: 'banner', hidden: true });
+    this.extraEl = h('div', { class: 'pane-extra', hidden: true });
     this.hostEl = h('div', { class: 'editor-host' });
     this.previewEl = h('div', { class: 'preview', tabindex: '0', 'aria-label': 'Preview' });
     this.bodyEl = h('div', { class: 'pane-body', hidden: true }, this.hostEl, this.previewEl);
     this.emptyEl = h('div', { class: 'placeholder' });
     this.el = h('section', { class: `pane pane-${role}`, 'data-role': role },
-      this.headEl, this.bannerEl, this.bodyEl, this.emptyEl);
+      this.headEl, this.bannerEl, this.extraEl, this.bodyEl, this.emptyEl);
 
     this.editor = new Editor(this.hostEl, {
       onChange: () => {
@@ -156,6 +157,13 @@ export class Pane {
   focus() {
     if (this.view === 'preview') this.previewEl.focus();
     else this.editor.focus();
+  }
+
+  // Something shown between the header and the text, such as a codex entry's
+  // images; null removes it.
+  setExtra(node) {
+    this.extraEl.replaceChildren(...(node ? [node] : []));
+    this.extraEl.hidden = !node;
   }
 
   // Selects a search match in the text, switching Preview to Split so the

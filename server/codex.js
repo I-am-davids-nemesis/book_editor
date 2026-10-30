@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { badRequest, conflict, notFound } from './errors.js';
+import { relinkCodex } from './lookbook.js';
 import { applyMoves } from './structure.js';
 import { slugify } from './names.js';
 import { resolveInBook } from './paths.js';
@@ -54,6 +55,8 @@ export async function renameCodexEntry(root, rel, { name } = {}) {
   }
   const to = `${path.posix.dirname(rel)}/${slug}.md`;
   const moves = await applyMoves(root, [{ from: rel, to }]);
+  // Lookbook images that show this entry follow it.
+  if (to !== rel) await relinkCodex(root, rel, to);
   return { path: to, moves, created: [], deleted: [] };
 }
 
@@ -66,5 +69,7 @@ export async function deleteCodexEntry(root, rel) {
     if (err.code === 'ENOENT') throw notFound(`No such file: ${rel}`);
     throw err;
   }
+  // Its images stay in the lookbook, unlinked from it.
+  await relinkCodex(root, rel, null);
   return { moves: [], created: [], deleted: [rel] };
 }

@@ -26,6 +26,9 @@ export function searchLabels(tree) {
   for (const [group, kind] of [['characters', 'character'], ['locations', 'location'], ['notes', 'note']]) {
     for (const e of tree.codex[group]) labels.set(e.path, { label: e.title, detail: kind });
   }
+  for (const img of tree.lookbook ?? []) {
+    if (img.hasNote) labels.set(img.notePath, { label: img.title, detail: 'lookbook note' });
+  }
   return labels;
 }
 

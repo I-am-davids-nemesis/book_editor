@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { countWords } from '../public/js/wordcount.js';
+import { listLookbook } from './lookbook.js';
 import { compareOrdered, parseChapterName, parseSceneName, titleize } from './names.js';
 
 const CHAPTER_SUMMARY = '_chapter.md';
@@ -170,6 +171,7 @@ export async function buildTree(root) {
     looseOutline: await looseFiles(root, 'outline'),
     codex: await buildCodex(root),
     rootFiles: await buildRootFiles(root),
+    lookbook: await listLookbook(root),
     words: chapters.reduce((n, c) => n + c.words, 0),
     wordsByMode: sumByMode(chapters),
     // Narration modes in use (variant names), and whether any scene has a

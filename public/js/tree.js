@@ -1,4 +1,4 @@
-import { bookHref, formatCount, h, showMenu } from './ui.js';
+import { bookHref, formatCount, h, imageSrc, showMenu } from './ui.js';
 
 // --- narration modes -------------------------------------------------------
 // A scene can exist as a plain file (mode '') and/or as variants
@@ -54,6 +54,27 @@ export function companionOf(tree, path, mode) {
   return { kind: 'scene', path: file ?? expectedSceneFile(scene, mode), exists: Boolean(file), mode, scene };
 }
 
+// --- lookbook ----------------------------------------------------------------
+
+// Codex entries an image can be linked to: [{ path, title, kind }]
+export function codexEntries(tree) {
+  const { codex } = tree;
+  return [['characters', 'character'], ['locations', 'location'], ['notes', 'note']]
+    .flatMap(([group, kind]) => codex[group].map((e) => ({ path: e.path, title: e.title, kind })));
+}
+
+// Each codex entry's images, in lookbook order: Map(path → [image])
+export function imagesByEntry(tree) {
+  const map = new Map();
+  for (const img of tree.lookbook ?? []) {
+    for (const p of img.of) {
+      if (!map.has(p)) map.set(p, []);
+      map.get(p).push(img);
+    }
+  }
+  return map;
+}
+
 // Updates the tree's word counts for one manuscript file, the way the server
 // computes them, so the sidebar can follow typing. Returns the scene and
 // chapter it touched, or null when the file isn't a counted scene file.
@@ -100,8 +121,9 @@ function moreButton(label, items) {
   }, '⋯');
 }
 
-function row({ id, tab, path, title, words, badges = [], active, missing, onCreate, menu, drag }) {
+function row({ id, tab, path, title, words, badges = [], active, missing, onCreate, menu, drag, thumb }) {
   const content = [
+    thumb ? h('img', { class: 'row-thumb', src: thumb, alt: '', loading: 'lazy' }) : null,
     h('span', { class: 'title' }, title),
     badges.map((b) => h('span', { class: 'badge', title: b.hint }, b.text)),
     words !== undefined ? h('span', { class: 'count' }, formatCount(words)) : null,
@@ -315,7 +337,7 @@ function outlineTab(ctx) {
 // --- codex tab ---------------------------------------------------------------
 
 function codexGroup(ctx, label, entries, { open = true, addKind, editable = true } = {}) {
-  const { id, activePath, actions } = ctx;
+  const { id, activePath, actions, images } = ctx;
   const children = [];
   let folder = '';
   for (const e of entries) {
@@ -329,6 +351,7 @@ function codexGroup(ctx, label, entries, { open = true, addKind, editable = true
       path: e.path,
       title: e.title,
       active: e.path === activePath,
+      thumb: images?.has(e.path) ? imageSrc(id, images.get(e.path)[0]) : null,
       menu: () => [
         { label: 'History of this file', onclick: () => actions.history(e.path) },
         ...(editable ? [
@@ -353,11 +376,13 @@ function codexGroup(ctx, label, entries, { open = true, addKind, editable = true
 function codexTab(ctx) {
   const { tree, actions } = ctx;
   const { codex } = tree;
+  ctx = { ...ctx, images: imagesByEntry(tree) };
   return [
     toolbar(
       addButton('+ Character', 'Add a character from the template', () => actions.addCodex('character')),
       addButton('+ Location', 'Add a location from the template', () => actions.addCodex('location')),
       addButton('+ Note', 'Add a free-form codex note', () => actions.addCodex('note')),
+      addButton('Lookbook', 'Images of characters, places and things', () => actions.lookbook()),
     ),
     codexGroup(ctx, 'Characters', codex.characters, { addKind: { kind: 'character', label: 'a character' } }),
     codexGroup(ctx, 'Locations', codex.locations, { addKind: { kind: 'location', label: 'a location' } }),

@@ -234,3 +234,20 @@ test('search over HTTP', async () => {
   assert.equal((await call('GET', '/api/books/sample/search?q=dorgal&case=1')).data.total, 0);
   assert.equal((await call('GET', '/api/books/sample/search?q=')).status, 400);
 });
+
+test('lookbook images upload, serve and show in the tree', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const up = await call('POST', '/api/books/sample/lookbook', { filename: 'tor.png', data: png, of: ['codex/characters/tor.md'] });
+  assert.equal(up.status, 200);
+  assert.equal(up.data.path, 'lookbook/tor.png');
+  const img = await fetch(`${base}/api/books/sample/image?path=lookbook/tor.png`);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await img.arrayBuffer()).toString('base64'), png);
+  assert.equal((await call('GET', '/api/books/sample/image?path=lookbook/missing.png')).status, 404);
+  assert.equal((await call('GET', '/api/books/sample/image?path=README.md')).status, 400);
+  assert.equal((await call('GET', '/api/books/sample/image?path=../../x.png')).status, 400);
+  const tree = await call('GET', '/api/books/sample/tree');
+  assert.deepEqual(tree.data.lookbook.map((i) => [i.path, i.of]), [['lookbook/tor.png', ['codex/characters/tor.md']]]);
+  assert.equal((await call('PATCH', '/api/books/sample/lookbook', { path: 'lookbook/tor.png', caption: 'Hi' })).status, 200);
+  assert.equal((await call('DELETE', '/api/books/sample/lookbook?path=lookbook/tor.png')).status, 200);
+});
