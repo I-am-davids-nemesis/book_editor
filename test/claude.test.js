@@ -27,6 +27,39 @@ async function service(script) {
   return { claude, calls: fake.calls };
 }
 
+test('ask answers a one-off question, reading only inside the book', async () => {
+  const root = await tempDir();
+  const outside = await tempDir();
+  const decisions = [];
+  const { claude, calls } = await service(async function* (options) {
+    for (const [tool, input] of [
+      ['Read', { file_path: path.join(root, 'codex/tor.md') }],
+      ['Read', { file_path: path.join(outside, 'secret.md') }],
+      ['Edit', { file_path: path.join(root, 'codex/tor.md') }],
+      ['Bash', { command: 'ls' }],
+    ]) {
+      decisions.push([tool, (await options.canUseTool(tool, input, {})).behavior]);
+    }
+    const hook = await options.hooks.PreToolUse[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: path.join(root, 'x.md') } });
+    decisions.push(['Write hook', hook.hookSpecificOutput.permissionDecision]);
+    yield { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Draft answer' }] } };
+    yield { ...result, result: '  Tor stands at the well.  ' };
+  });
+  assert.equal(await claude.ask(root, 'Write a brief'), 'Tor stands at the well.');
+  assert.deepEqual(decisions, [['Read', 'allow'], ['Read', 'deny'], ['Edit', 'deny'], ['Bash', 'deny'], ['Write hook', 'deny']]);
+  const { options } = calls[0];
+  assert.deepEqual(options.tools, ['Read', 'Glob', 'Grep']);
+  assert.equal(options.resume, undefined);
+  // No session or checkpoint: the book's store isn't touched.
+  assert.deepEqual((await claude.session(root)).sessionId ?? null, null);
+
+  await assert.rejects(claude.ask(root, ''), /Missing prompt/);
+  const failing = await service(async function* () {
+    yield { type: 'result', subtype: 'error_max_turns', is_error: true, errors: [] };
+  });
+  await assert.rejects(failing.claude.ask(root, 'x'), (err) => err.status === 502 && /error_max_turns/.test(err.message));
+});
+
 // Resolves with all of a run's events once it is over.
 function collect(run) {
   return new Promise((resolve) => {

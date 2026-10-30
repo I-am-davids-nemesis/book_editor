@@ -2,7 +2,7 @@
 // entry's fixed traits and variants, and the lookbook images marked as its
 // references. Shared by the browser and the server.
 
-import { FIXED_TRAITS, imagePromptFrom } from './codexprompts.js';
+import { DESCRIPTION, FIXED_TRAITS, imagePromptFrom } from './codexprompts.js';
 import { bullets, prose, sectionBody } from './sections.js';
 
 export const VISUAL_STYLE = 'codex/visual-style.md';
@@ -72,9 +72,10 @@ export function missingViews(kind, images) {
   return (NEEDED_VIEWS[kind] ?? []).filter((v) => !have.has(v));
 }
 
-// How a reference is named in a prompt: "this character's face (winter coat)".
-function describeRef(img, kind) {
-  const subject = kind === 'location' ? 'this place' : kind === 'character' ? 'this character' : 'the subject';
+// How a reference is named in a prompt: "this character's face (winter coat)",
+// or with a name, "Tor’s face (winter coat)".
+function describeRef(img, kind, name = null) {
+  const subject = name ?? (kind === 'location' ? 'this place' : kind === 'character' ? 'this character' : 'the subject');
   const view = {
     face: `${subject}’s face`,
     full: `${subject}, full length`,
@@ -106,4 +107,121 @@ export function handoffPrompt({ kind, text, styleText = '', refs = [] }) {
   if (style) parts.push(`Style: ${style}`);
   if (avoid) parts.push(`Avoid: ${avoid}.`);
   return parts.join('\n\n');
+}
+
+// --- staging a shot -------------------------------------------------------------
+
+export const SHOT_SIZES = { wide: 'Wide shot', medium: 'Medium shot', close: 'Close-up' };
+
+// How an entry looks, for a picture with others in it: its Description's prose
+// (not the image prompt, which stages its own scene), plus the chosen
+// variant's subsection; or the entry's opening lines if it has no Description.
+export function entryLook(text, variant = '') {
+  const desc = sectionBody(text, 2, DESCRIPTION);
+  let base = desc === null ? '' : prose(desc.split(/^#{3,6}\s/m)[0]);
+  if (!base) {
+    const intro = String(text).replace(/^\s*#\s.*$/m, '').split(/^##\s/m)[0];
+    base = prose(intro);
+  }
+  const variantText = variant ? prose(sectionBody(desc ?? text, 3, `Variant: ${variant}`) ?? '') : '';
+  return [base, variantText].filter(Boolean).join(' ').replace(/\n\n/g, ' ');
+}
+
+// The entries a shot shows: its people, then its setting.
+//   shot: { location, characters: [{ path, variant }] }
+function shotEntries(shot) {
+  return [
+    ...shot.characters.map((c) => ({ path: c.path, variant: c.variant ?? '' })),
+    ...(shot.location ? [{ path: shot.location, variant: '' }] : []),
+  ];
+}
+
+// Every image of the shot's entries, ranked per entry, each once:
+//   [{ img, entry: path }]. An image of two entries counts for the first.
+export function shotImages({ shot, entries, images }) {
+  const seen = new Set();
+  const out = [];
+  for (const { path, variant } of shotEntries(shot)) {
+    const kind = entries.get(path)?.kind;
+    const mine = images.filter((img) => img.of.includes(path));
+    for (const img of rankImages(mine, kind, { variant })) {
+      if (seen.has(img.path)) continue;
+      seen.add(img.path);
+      out.push({ img, entry: path });
+    }
+  }
+  return out;
+}
+
+// The references to send, at most `max`: each person's best one, then the
+// setting's, then everyone's second, and so on.
+export function pickReferences(candidates, max) {
+  const byEntry = new Map();
+  for (const c of candidates) {
+    if (!isReference(c.img)) continue;
+    if (!byEntry.has(c.entry)) byEntry.set(c.entry, []);
+    byEntry.get(c.entry).push(c);
+  }
+  const queues = [...byEntry.values()];
+  const out = [];
+  for (let round = 0; out.length < max && queues.some((q) => q.length > round); round += 1) {
+    for (const q of queues) if (q[round] && out.length < max) out.push(q[round]);
+  }
+  return out;
+}
+
+// The full prompt for a shot. `refs` are the chosen [{ img, entry }], in the
+// order they'll be attached.
+//   shot: { location, characters, moment: { text }, brief, framing: { shot, time, notes } }
+//   entries: Map(path → { title, kind, text })
+export function assembleShot({ shot, entries, styleText = '', refs = [] }) {
+  const parts = [];
+  const what = (shot.brief || '').trim() || (shot.moment?.text || '').trim().replace(/\s*\n\s*/g, ' ');
+  if (what) parts.push(what);
+
+  const f = shot.framing ?? {};
+  const framing = [SHOT_SIZES[f.shot] && `${SHOT_SIZES[f.shot]}.`, f.time && `Time: ${f.time.replace(/[.\s]+$/, '')}.`, f.notes && `${f.notes.replace(/[.\s]+$/, '')}.`].filter(Boolean);
+  if (framing.length) parts.push(framing.join(' '));
+
+  const describe = ({ path, variant }, setting) => {
+    const e = entries.get(path);
+    if (!e) return null;
+    const look = entryLook(e.text ?? '', variant);
+    const traits = fixedTraits(e.text ?? '').map((t) => t.replace(/[.\s]+$/, ''));
+    // Nothing known yet: a bare name gives a generator nothing to go on.
+    if (!look && !traits.length) return null;
+    const label = setting ? `Setting, ${e.title}` : e.title;
+    return `${label}${variant ? ` (${variant})` : ''}:${look ? ` ${look.replace(/[.\s]+$/, '')}.` : ''}${traits.length ? ` Must match exactly: ${traits.join('; ')}.` : ''}`;
+  };
+  if (shot.location) {
+    const line = describe({ path: shot.location, variant: '' }, true);
+    if (line) parts.push(line);
+  }
+  for (const c of shot.characters) {
+    const line = describe(c, false);
+    if (line) parts.push(line);
+  }
+
+  if (refs.length) {
+    parts.push([
+      'Reference images, attached in this order. Keep each person and place consistent with their images:',
+      ...refs.map(({ img, entry }, i) => {
+        const e = entries.get(entry);
+        return `Image ${i + 1}: ${describeRef(img, e?.kind, e?.title)}.`;
+      }),
+    ].join('\n'));
+  }
+  const { style, avoid } = visualStyle(styleText);
+  if (style) parts.push(`Style: ${style}`);
+  if (avoid) parts.push(`Avoid: ${avoid}.`);
+  return parts.join('\n\n');
+}
+
+// Codex entries whose title (or its first word, for "Tor Halloran") appears as
+// a word in `text`, matching case, since names are capitalized: [path], in
+// entry order.
+export function mentionedEntries(text, entries) {
+  const words = String(text);
+  const has = (name) => name.length > 1 && new RegExp(`(^|[^\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(words);
+  return entries.filter((e) => has(e.title) || (e.title.includes(' ') && has(e.title.split(' ')[0]) && e.kind === 'character')).map((e) => e.path);
 }

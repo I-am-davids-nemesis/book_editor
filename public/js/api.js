@@ -59,6 +59,7 @@ export const api = {
 
   claudeSession: (id) => request('GET', `${book(id)}/claude/session`),
   claudeClear: (id) => request('DELETE', `${book(id)}/claude/session`),
+  claudeAsk: (id, prompt) => request('POST', `${book(id)}/claude/ask`, { prompt }),
   claudeSettings: (id, settings) => request('PUT', `${book(id)}/claude/settings`, settings),
   claudeStart: (id, { prompt, context, newSession }) => request('POST', `${book(id)}/claude/runs`, { prompt, context, newSession }),
   claudeAnswer: (id, run, requestId, allow) =>

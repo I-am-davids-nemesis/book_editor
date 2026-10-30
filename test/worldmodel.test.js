@@ -4,8 +4,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { addVisualStyle } from '../server/codex.js';
 import { prepareHandoff } from '../server/handoff.js';
+import { briefPrompt } from '../public/js/codexprompts.js';
 import {
-  fixedTraits, handoffPrompt, missingViews, rankImages, variantsIn, visualStyle, VISUAL_STYLE,
+  assembleShot, entryLook, fixedTraits, handoffPrompt, mentionedEntries, missingViews, pickReferences, rankImages,
+  shotImages, variantsIn, visualStyle, VISUAL_STYLE,
 } from '../public/js/worldmodel.js';
 import { listFiles, tempDir, writeFiles } from './helpers.js';
 
@@ -140,4 +142,104 @@ test('handoff copies the chosen images in order to a fresh folder and reveals it
   await assert.rejects(prepareHandoff(root, { paths: ['lookbook/../codex/x.png'] }, opts), /lookbook images/);
   await assert.rejects(prepareHandoff(root, { paths: ['lookbook/none.png'] }, opts), /No such file/);
   await assert.rejects(prepareHandoff(root, { paths: [] }, opts), /paths/);
+});
+
+const well = `# Washing House
+
+The yard where the washers work.
+
+## Description
+
+A cobbled yard around a stone well, with long wooden troughs under a lean-to.
+
+## Fixed traits
+
+- Round stone well with an iron winch
+`;
+
+const dorgal = '# Dorgal\n\nThe overseer, a heavy man in a leather apron.\n';
+
+const entries = new Map([
+  ['codex/characters/tor.md', { title: 'Tor', kind: 'character', text: tor }],
+  ['codex/characters/dorgal.md', { title: 'Dorgal', kind: 'character', text: dorgal }],
+  ['codex/locations/washing-house.md', { title: 'Washing House', kind: 'location', text: well }],
+]);
+
+const shotImage = (name, of, extra = {}) => img(name, { of, ...extra });
+const lookbook = [
+  shotImage('tor-face', ['codex/characters/tor.md'], { use: 'reference', view: 'face' }),
+  shotImage('tor-full', ['codex/characters/tor.md'], { use: 'reference', view: 'full' }),
+  shotImage('tor-coat', ['codex/characters/tor.md'], { use: 'reference', view: 'full', variant: 'winter coat' }),
+  shotImage('dorgal-face', ['codex/characters/dorgal.md'], { use: 'reference', view: 'face' }),
+  shotImage('yard', ['codex/locations/washing-house.md'], { use: 'reference', view: 'establishing' }),
+  shotImage('both', ['codex/characters/tor.md', 'codex/characters/dorgal.md']),
+];
+
+test('an entry’s look is its description prose, plus a chosen variant', () => {
+  assert.equal(entryLook(tor), 'Tall and stooped.');
+  assert.equal(entryLook(tor, 'winter coat'), 'Tall and stooped. A grey felt coat to the knee.');
+  assert.equal(entryLook(dorgal), 'The overseer, a heavy man in a leather apron.');
+});
+
+test('a shot’s references take each person’s best image first, then the setting’s', () => {
+  const shot = { location: 'codex/locations/washing-house.md', characters: [{ path: 'codex/characters/tor.md', variant: 'winter coat' }, { path: 'codex/characters/dorgal.md' }] };
+  const candidates = shotImages({ shot, entries, images: lookbook });
+  assert.deepEqual(candidates.map((c) => [c.img.title, c.entry.split('/').pop()]), [
+    ['tor-coat', 'tor.md'], ['tor-face', 'tor.md'], ['tor-full', 'tor.md'], ['both', 'tor.md'],
+    ['dorgal-face', 'dorgal.md'],
+    ['yard', 'washing-house.md'],
+  ]);
+  assert.deepEqual(pickReferences(candidates, 4).map((c) => c.img.title), ['tor-coat', 'dorgal-face', 'yard', 'tor-face']);
+  assert.deepEqual(pickReferences(candidates, 10).map((c) => c.img.title), ['tor-coat', 'dorgal-face', 'yard', 'tor-face', 'tor-full']);
+});
+
+test('a shot’s prompt has the moment, framing, each entry’s look and traits, the references and the style', () => {
+  const shot = {
+    location: 'codex/locations/washing-house.md',
+    characters: [{ path: 'codex/characters/tor.md', variant: 'winter coat' }, { path: 'codex/characters/dorgal.md', variant: '' }],
+    moment: { text: 'Tor set the bucket down.\nDorgal watched.', source: 'manuscript/01-a/01-b.md' },
+    brief: '',
+    framing: { shot: 'wide', time: 'dawn', notes: '' },
+  };
+  const refs = pickReferences(shotImages({ shot, entries, images: lookbook }), 3);
+  assert.equal(assembleShot({ shot, entries, styleText: style, refs }), `Tor set the bucket down. Dorgal watched.
+
+Wide shot. Time: dawn.
+
+Setting, Washing House: A cobbled yard around a stone well, with long wooden troughs under a lean-to. Must match exactly: Round stone well with an iron winch.
+
+Tor (winter coat): Tall and stooped. A grey felt coat to the knee. Must match exactly: Scar across the right cheek, jaw to ear; Grey eyes.
+
+Dorgal: The overseer, a heavy man in a leather apron.
+
+Reference images, attached in this order. Keep each person and place consistent with their images:
+Image 1: Tor, full length (winter coat).
+Image 2: Dorgal’s face.
+Image 3: Washing House, establishing view.
+
+Style: Medium: Gouache illustration. Light: Low natural light, never harsh.
+
+Avoid: text or lettering; glossy armor.`);
+  // An entry with nothing known is left out rather than named bare.
+  const bare = new Map([...entries, ['codex/characters/dorgal.md', { title: 'Dorgal', kind: 'character', text: '# Dorgal\n' }]]);
+  assert.doesNotMatch(assembleShot({ shot, entries: bare }), /Dorgal:|^Dorgal\.$/m);
+  // A brief replaces the moment.
+  assert.match(assembleShot({ shot: { ...shot, brief: 'Tor kneels by the well.' }, entries }), /^Tor kneels by the well\.\n\nWide shot/);
+});
+
+test('names in a passage suggest entries, matching case', () => {
+  const list = [...entries].map(([path, e]) => ({ path, ...e }));
+  assert.deepEqual(mentionedEntries('At the Washing House, Tor looked up. dorgal was late.', list), ['codex/characters/tor.md', 'codex/locations/washing-house.md']);
+  assert.deepEqual(mentionedEntries('Tormund came.', list), []);
+});
+
+test('the brief prompt names the moment, the cast and the rules', () => {
+  const prompt = briefPrompt(
+    { moment: { text: 'Tor set the bucket down.', source: 'manuscript/01-a/01-b.md' }, framing: { shot: 'wide', time: 'dawn' } },
+    { people: [{ title: 'Tor', path: 'codex/characters/tor.md' }], setting: { title: 'Washing House', path: 'codex/locations/washing-house.md' } },
+  );
+  assert.match(prompt, /from manuscript\/01-a\/01-b\.md/);
+  assert.match(prompt, /In the picture: Tor \(codex\/characters\/tor\.md\)\. Setting: Washing House/);
+  assert.match(prompt, /Framing asked for: wide shot; time: dawn\./);
+  assert.match(prompt, /Don't describe how people or places look/);
 });

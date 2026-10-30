@@ -17,6 +17,67 @@ export async function loadVisualStyle(bookId) {
   }
 }
 
+export const refLabel = (img) => (isReference(img)
+  ? [VIEW_LABELS[img.view] ?? 'Reference', img.variant].filter(Boolean).join(' · ')
+  : 'Not marked as a reference');
+
+// Images to send, each with a tick box; the ticked ones are numbered in order.
+//   items: [{ img, on, note }]   onToggle(img, on)
+export function referenceItems(bookId, items, onToggle) {
+  let n = 0;
+  return items.map(({ img, on, note }) => {
+    const box = h('input', { type: 'checkbox', checked: on, 'aria-label': `Send ${img.title}` });
+    box.addEventListener('change', () => onToggle(img, box.checked));
+    return h('li', { class: `handoff-ref${on ? ' on' : ''}` },
+      h('span', { class: 'handoff-num' }, on ? String((n += 1)) : ''),
+      h('img', { src: imageSrc(bookId, img), alt: img.title, title: on ? 'Drag this into the generator’s tab' : img.title }),
+      h('label', {}, box, h('span', {}, h('strong', {}, img.title), h('span', { class: 'muted' }, note ?? refLabel(img)))));
+  });
+}
+
+async function copyPrompt(promptEl) {
+  try {
+    await navigator.clipboard.writeText(promptEl.value);
+    return true;
+  } catch {
+    promptEl.select();
+    toast('Couldn’t copy; the prompt is selected, so press ⌘C', { error: true });
+    return false;
+  }
+}
+
+// The buttons that hand a prompt and its images to an outside generator:
+// copy, show the images in Finder (numbered), and copy-and-open each tool.
+//   getRefs() → [img] in order   tool: the one to favor, or null
+export function handoffButtons({ bookId, name, promptEl, getRefs, tool = null, after = '' }) {
+  const finder = IS_MAC ? h('button', {
+    type: 'button',
+    title: 'Copy the chosen images to a folder, numbered in prompt order, and open it',
+    onclick: async () => {
+      const refs = getRefs();
+      if (!refs.length) return toast('Choose at least one image first', { error: true });
+      try {
+        await api.handoff(bookId, refs.map((img) => img.path), name());
+      } catch (err) {
+        toast(err.message, { error: true });
+      }
+    },
+  }, 'Show in Finder') : null;
+  const tools = (tool ? [tool] : IMAGE_TOOLS).map((t) => h('button', {
+    type: 'button',
+    class: t === (tool ?? IMAGE_TOOLS[0]) ? 'primary' : null,
+    onclick: async () => {
+      if (!(await copyPrompt(promptEl))) return;
+      window.open(t.url, '_blank', 'noopener');
+      toast(`Prompt copied. Paste it into ${t.label}, attach the numbered images${after}.`, { ms: 8000 });
+    },
+  }, `Copy and open ${t.label}`));
+  return {
+    start: [h('button', { type: 'button', onclick: async () => { if (await copyPrompt(promptEl)) toast('Prompt copied'); } }, 'Copy prompt'), finder],
+    end: tools,
+  };
+}
+
 // Prepares an entry for ChatGPT, Gemini or another generator: the full prompt
 // (image prompt, fixed traits, numbered references, visual style) and the
 // reference images to drag across in the same order.
@@ -36,22 +97,10 @@ export async function handoffDialog({ bookId, entry, text, images, tool = null }
   const render = () => {
     const refs = selected();
     if (!edited) promptEl.value = handoffPrompt({ kind: entry.kind, text, styleText, refs }) ?? '';
-    let n = 0;
-    refsEl.replaceChildren(...ranked.map((img) => {
-      const on = chosen.has(img.path);
-      const box = h('input', { type: 'checkbox', checked: on, 'aria-label': `Send ${img.title}` });
-      box.addEventListener('change', () => {
-        if (box.checked) chosen.add(img.path);
-        else chosen.delete(img.path);
-        render();
-      });
-      const label = isReference(img)
-        ? [VIEW_LABELS[img.view] ?? 'Reference', img.variant].filter(Boolean).join(' · ')
-        : 'Not marked as a reference';
-      return h('li', { class: `handoff-ref${on ? ' on' : ''}` },
-        h('span', { class: 'handoff-num' }, on ? String((n += 1)) : ''),
-        h('img', { src: imageSrc(bookId, img), alt: img.title, title: on ? 'Drag this into the generator’s tab' : img.title }),
-        h('label', {}, box, h('span', {}, h('strong', {}, img.title), h('span', { class: 'muted' }, label))));
+    refsEl.replaceChildren(...referenceItems(bookId, ranked.map((img) => ({ img, on: chosen.has(img.path) })), (img, on) => {
+      if (on) chosen.add(img.path);
+      else chosen.delete(img.path);
+      render();
     }));
     hintEl.textContent = !ranked.length
       ? 'This entry has no images yet. The prompt works on its own; add the result to the entry, then mark the best as a reference in the Lookbook.'
@@ -62,40 +111,8 @@ export async function handoffDialog({ bookId, entry, text, images, tool = null }
           : `Attach the ${refs.length === 1 ? 'image' : `${refs.length} images`} in this order: drag them across, or use Show in Finder.`;
   };
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(promptEl.value);
-      return true;
-    } catch {
-      promptEl.select();
-      toast('Couldn’t copy; the prompt is selected, so press ⌘C', { error: true });
-      return false;
-    }
-  };
-
   return new Promise((resolve) => {
-    const finder = IS_MAC ? h('button', {
-      type: 'button',
-      onclick: async () => {
-        const refs = selected();
-        if (!refs.length) return toast('Choose at least one image first', { error: true });
-        try {
-          await api.handoff(bookId, refs.map((img) => img.path), entry.title);
-        } catch (err) {
-          toast(err.message, { error: true });
-        }
-      },
-    }, 'Show in Finder') : null;
-    const tools = (tool ? [tool] : IMAGE_TOOLS).map((t) => h('button', {
-      type: 'button',
-      class: t === (tool ?? IMAGE_TOOLS[0]) ? 'primary' : null,
-      onclick: async () => {
-        if (!(await copy())) return;
-        window.open(t.url, '_blank', 'noopener');
-        toast(`Prompt copied. Paste it into ${t.label}, attach the numbered images, then drop the result on “${entry.title}”.`, { ms: 8000 });
-      },
-    }, `Copy and open ${t.label}`));
-
+    const buttons = handoffButtons({ bookId, name: () => entry.title, promptEl, getRefs: selected, tool, after: `, then drop the result on “${entry.title}”` });
     const dialog = h('dialog', { class: 'dialog handoff-dialog' },
       h('form', { method: 'dialog' },
         h('h2', {}, `Prepare “${entry.title}” for an image generator`),
@@ -103,10 +120,9 @@ export async function handoffDialog({ bookId, entry, text, images, tool = null }
           h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Prompt'), promptEl),
           h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Reference images'), refsEl, hintEl)),
         h('div', { class: 'dialog-buttons' },
-          h('button', { type: 'button', onclick: async () => { if (await copy()) toast('Prompt copied'); } }, 'Copy prompt'),
-          finder,
+          buttons.start,
           h('span', { class: 'spacer' }),
-          tools,
+          buttons.end,
           h('button', { type: 'submit' }, 'Close'))));
     dialog.addEventListener('close', () => {
       dialog.remove();

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { checkpoint } from './autocommit.js';
 import { configPath } from './config.js';
-import { badRequest, conflict, notFound } from './errors.js';
+import { badRequest, conflict, HttpError, notFound } from './errors.js';
 import { git, isRepo } from './git.js';
 import { resolveInBook } from './paths.js';
 
@@ -19,6 +19,8 @@ const EXTRA_TOOLS = new Set(['Bash', 'WebFetch', 'WebSearch']);
 const EXTRA_TOOL_SETTINGS = ['off', 'ask'];
 
 const MAX_PROMPT = 20000;
+const ASK_TIMEOUT_MS = 3 * 60 * 1000;
+const ASK_MAX_TURNS = 12;
 const MAX_SELECTION = 20000;
 const MAX_ENTRIES = 2000;
 
@@ -50,6 +52,69 @@ export class ClaudeService {
     this.storeDirOverride = storeDir;
     this.runs = new Map(); // runId -> Run (the latest per book is kept for replay)
     this.active = new Map(); // book root -> running Run
+  }
+
+  // A one-off question about the book, for answers that go back into a dialog
+  // rather than into files: no session, no checkpoint, no approvals. Claude
+  // may read and search inside the book and do nothing else. Resolves with
+  // its final answer.
+  async ask(root, prompt, { signal } = {}) {
+    if (typeof prompt !== 'string' || !prompt.trim()) throw badRequest('Missing prompt');
+    if (prompt.length > MAX_PROMPT) throw badRequest(`The prompt is too long (at most ${MAX_PROMPT} characters)`);
+    const policy = new Policy(root, 'off');
+    await policy.init();
+    const abort = new AbortController();
+    signal?.addEventListener('abort', () => abort.abort(), { once: true });
+    const timer = setTimeout(() => abort.abort(), ASK_TIMEOUT_MS);
+    const readOnly = async (tool, input) => (READ_TOOLS.has(tool) && (await policy.decide(tool, input)).action === 'allow'
+      ? { behavior: 'allow', updatedInput: input }
+      : { behavior: 'deny', message: 'Only reading and searching inside the book is allowed here.' });
+    let text = '';
+    let result = null;
+    try {
+      const messages = this.query({
+        prompt,
+        options: {
+          cwd: root,
+          env: agentEnv(),
+          settingSources: ['project'],
+          systemPrompt: { type: 'preset', preset: 'claude_code', append: SYSTEM_APPEND },
+          tools: [...READ_TOOLS],
+          permissionMode: 'default',
+          canUseTool: readOnly,
+          // Settings can't widen this: anything but an in-book read is refused.
+          hooks: {
+            PreToolUse: [{
+              hooks: [async (input) => {
+                if (input?.hook_event_name !== 'PreToolUse') return {};
+                const { behavior, message } = await readOnly(input.tool_name, input.tool_input || {});
+                return behavior === 'allow' ? {} : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: message } };
+              }],
+            }],
+          },
+          maxTurns: ASK_MAX_TURNS,
+          abortController: abort,
+        },
+      });
+      for await (const msg of messages) {
+        if (msg.parent_tool_use_id) continue;
+        if (msg.type === 'assistant') {
+          const said = (msg.message?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+          if (said.trim()) text = said;
+        } else if (msg.type === 'result') {
+          if (msg.is_error) throw new Error(msg.errors?.join('\n') || msg.subtype || 'Claude stopped with an error');
+          result = msg.result;
+        }
+      }
+    } catch (err) {
+      if (abort.signal.aborted) throw new HttpError(504, signal?.aborted ? 'Cancelled' : 'Claude took too long to answer');
+      throw new HttpError(502, friendlyError(err));
+    } finally {
+      clearTimeout(timer);
+    }
+    const answer = (typeof result === 'string' && result.trim() ? result : text).trim();
+    if (!answer) throw new HttpError(502, 'Claude didn’t answer');
+    return answer;
   }
 
   // Session ids and transcripts live with the editor's config, not in the book.

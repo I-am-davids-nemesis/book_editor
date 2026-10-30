@@ -8,7 +8,8 @@ import { HistoryView } from './history.js';
 import { renderLibrary } from './library.js';
 import { fixedTraitsPrompt, gatherPrompt, manuscriptPrompt, refinePrompt } from './codexprompts.js';
 import { entryStrip, LookbookView, uploadImages } from './lookbook.js';
-import { VISUAL_STYLE } from './worldmodel.js';
+import { stageDialog } from './stage.js';
+import { mentionedEntries, VISUAL_STYLE } from './worldmodel.js';
 import { Pane } from './pane.js';
 import { quickOpen, quickOpenItems } from './quickopen.js';
 import { searchDialog } from './search.js';
@@ -44,6 +45,13 @@ class BookView {
 
     this.modeSwitchEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode', hidden: true });
     this.companionBtn = h('button', { type: 'button', class: 'companion-toggle', hidden: true, onclick: () => this.toggleCompanion() });
+    this.stageBtn = h('button', {
+      type: 'button',
+      class: 'stage-btn',
+      hidden: true,
+      title: 'Stage a picture of this scene (or of the selected passage) for an image generator',
+      onclick: () => this.stageScene(),
+    }, 'Stage');
 
     const paneOptions = (role) => ({
       bookId: id,
@@ -55,7 +63,7 @@ class BookView {
       onCloseRequest: (pane) => this.closePane(pane),
       onSelect: () => this.claude?.refreshContext(),
     });
-    this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn] });
+    this.main = new Pane({ ...paneOptions('main'), headExtras: [this.modeSwitchEl, this.companionBtn, this.stageBtn] });
     this.sideModeEl = h('span', { class: 'segmented mode-switch', role: 'group', 'aria-label': 'Narration mode of the scene', hidden: true });
     this.side = new Pane({ ...paneOptions('side'), headExtras: [this.sideModeEl] });
     this.main.close(NOTHING_OPEN);
@@ -105,6 +113,7 @@ class BookView {
         upload: (files, of) => this.uploadImages(files, of),
         refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path }),
         visualStyle: () => this.openVisualStyle(),
+        stage: () => this.stage(),
       },
     });
     this.el.append(this.lookbook.el);
@@ -479,6 +488,7 @@ class BookView {
   // A codex entry's images and description actions, above its text.
   renderCodexStrip() {
     const path = this.main.file?.path;
+    this.stageBtn.hidden = !path?.startsWith('manuscript/');
     const entry = path && path !== VISUAL_STYLE && codexEntries(this.tree).find((e) => e.path === path);
     this.main.setExtra(entry ? entryStrip({
       bookId: this.id,
@@ -486,6 +496,7 @@ class BookView {
       entry,
       getText: () => this.main.content,
       onAdd: (files) => this.uploadImages(files, [path]),
+      onStage: () => this.stage(entry.kind === 'location' ? { location: path } : { characters: [path] }),
       claude: {
         gather: () => this.askClaude(gatherPrompt(entry)),
         traits: () => this.askClaude(fixedTraitsPrompt(entry)),
@@ -493,6 +504,34 @@ class BookView {
         manuscript: () => this.askClaude(manuscriptPrompt(entry)),
       },
     }) : null);
+  }
+
+  // The Stage dialog, for a picture of a moment. Entry texts come from the
+  // open editor when the entry is open there, so unsaved edits count.
+  async stage(initial = {}) {
+    await stageDialog({
+      bookId: this.id,
+      tree: this.tree,
+      initial,
+      readEntry: async (path) => (this.main.file?.path === path ? this.main.content : (await api.readFile(this.id, path)).content),
+    });
+  }
+
+  // Stages the open scene: the selected passage if there is one, else the
+  // whole scene. People and the place named in a short passage start in the
+  // shot; for a whole scene they're only suggested.
+  stageScene() {
+    const path = this.main.file?.path;
+    if (!path) return;
+    const selection = this.main.selection.trim();
+    const text = selection || this.main.content.trim();
+    const named = selection ? mentionedEntries(selection, codexEntries(this.tree)) : [];
+    const kindOf = new Map(codexEntries(this.tree).map((e) => [e.path, e.kind]));
+    this.stage({
+      characters: named.filter((p) => kindOf.get(p) === 'character'),
+      location: named.find((p) => kindOf.get(p) === 'location') ?? null,
+      moment: { text, source: path },
+    });
   }
 
   // Opens the book's visual style note, creating it from the template first.

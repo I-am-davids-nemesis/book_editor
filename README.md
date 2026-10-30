@@ -105,7 +105,17 @@ An open codex entry has two menus above its text:
 - **References.** In the Lookbook, tick **★ Reference** on the images that show a character or place the way it should look, and pick the view (face, full length, turnaround, expressions; establishing shot, interior, map) and, if it's a variant, its name (`winter coat`, `age 12`). References are sent with prompts, come first in an entry's strip with a ★, and the strip says which views the model sheet still lacks. Link a reference only to the entry it's a reference of.
 - **Variants.** A `### Variant: winter coat` subsection in an entry's Description describes a look the character has for part of the book. The Lookbook suggests those names for references.
 
-Each of these is an ordinary Claude run: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
+### Staging a shot
+
+**Stage a shot** puts characters in a place and builds one prompt for a picture of a moment. Open it with **Stage** above a manuscript scene (it uses the selected passage, or the whole scene), with **Image prompt ▾ → Stage a shot with …** on a codex entry, or from the Lookbook.
+
+- **Left: what's in the shot.** The setting, the people (each with its usual look or a variant), the moment, an optional brief, and the framing (wide, medium or close; time of day; camera notes). People and places named in a selected passage start in the shot; names in a whole scene are offered under **Mentioned**.
+- **Write it with Claude** reads the scene and writes a brief: a few sentences on what the picture shows (who is where, doing what, the light and mood). It's a quick read-only question, not a panel run, so nothing in the book changes. A brief, when there is one, is used instead of the moment.
+- **Middle: the prompt.** The moment or brief, the framing, the setting's and each person's description and fixed traits, the numbered reference images, and the visual style. Edit it freely; **Rebuild it** goes back to the generated one. An entry with no description yet is left out, and the dialog says so.
+- **Right: the references.** Each person's best reference first, then the setting's, then everyone's second, up to the limit you choose. Tick or untick any image of the shot's entries.
+- **Copy and open ChatGPT / Gemini** and **Show in Finder** work as in Prepare. Drop the picture you get back in the Lookbook.
+
+The **Claude ▾** actions are ordinary Claude runs: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
 
 On disk, images live in `lookbook/`. Each linked or captioned image has a note beside it with the same name (`lookbook/tor-at-the-well.md`), which lists the entries it shows under `of:` and holds the caption. The note also embeds the image, so it reads well in Obsidian:
 

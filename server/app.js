@@ -332,6 +332,13 @@ export function createApp({
     res.json(await claude.session(await bookRoot(req)));
   });
 
+  // A one-off, read-only question; the answer comes back in the response.
+  claudeRoutes.post('/ask', async (req, res) => {
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) abort.abort(); });
+    res.json({ text: await claude.ask(await bookRoot(req), req.body?.prompt, { signal: abort.signal }) });
+  });
+
   claudeRoutes.delete('/session', async (req, res) => {
     res.json(await claude.clear(await bookRoot(req)));
   });

@@ -107,3 +107,22 @@ export function imagePromptFrom(markdown) {
   const text = prose(prompt ?? section.split(/^#{3,6}\s/m)[0]);
   return text || null;
 }
+
+// A one-off question (not a panel run): turn a moment of the story into a
+// visual brief for one picture. The answer goes back into the Stage dialog.
+//   shot: { moment: { text, source }, framing: { shot, time, notes } }
+//   people, setting: [{ title, path }] and { title, path } | null
+export function briefPrompt({ moment, framing = {} }, { people = [], setting = null } = {}) {
+  const cast = people.length ? people.map((p) => `${p.title} (${p.path})`).join(', ') : 'no one in particular';
+  const frame = [framing.shot && `${framing.shot} shot`, framing.time && `time: ${framing.time}`, framing.notes].filter(Boolean).join('; ');
+  return `Write a visual brief for one illustration of a moment in this book.
+
+The moment${moment.source ? ` (from ${moment.source})` : ''}:
+"""
+${moment.text.trim()}
+"""
+
+In the picture: ${cast}.${setting ? ` Setting: ${setting.title} (${setting.path}).` : ''}${frame ? `\nFraming asked for: ${frame}.` : ''}
+
+If you need context (who is where, what they hold, the weather, the light, what just happened), read the scene file around the moment and the codex entries. Then answer with only the brief: 3 to 6 sentences in the present tense, saying what the picture shows: where each person is and what they're doing, their expressions and gestures, the key objects, the light and the mood. Refer to people by name. Don't describe how people or places look (faces, build, clothing, architecture): the prompt adds that from the codex. Don't add events that aren't in the moment, and don't name the book. No preamble, no headings, no quotation marks around the brief.`;
+}

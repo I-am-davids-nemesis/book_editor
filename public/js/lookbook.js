@@ -106,7 +106,8 @@ const viewLabel = (img) => [VIEW_LABELS[img.view] ?? 'Reference', img.variant].f
 // to add more), what its model sheet still lacks, the image prompt for outside
 // generators, and Claude's description actions.
 //   entry: { path, title, kind }   claude: { gather(), refine(images), manuscript(), traits() }
-export function entryStrip({ bookId, tree, entry, getText, onAdd, claude }) {
+//   onStage(): opens the Stage dialog with this entry in the shot
+export function entryStrip({ bookId, tree, entry, getText, onAdd, onStage, claude }) {
   const images = rankImages(imagesByEntry(tree).get(entry.path) ?? [], entry.kind);
   const thumbs = h('div', { class: 'thumb-strip', title: 'Drop images here to add them to the lookbook, linked to this entry' },
     images.map((img) => h('a', {
@@ -140,6 +141,8 @@ export function entryStrip({ bookId, tree, entry, getText, onAdd, claude }) {
       })),
       null,
       { label: 'Copy image prompt only', disabled: !hasPrompt, onclick: () => copyImagePrompt(bookId, entry, text) },
+      null,
+      { label: `Stage a shot with ${entry.title}…`, onclick: () => onStage() },
     ]);
   };
   const claudeMenu = (e) => {
@@ -163,7 +166,7 @@ export function entryStrip({ bookId, tree, entry, getText, onAdd, claude }) {
 // The Lookbook: every image in the book as a grid, filtered by codex entry,
 // with a detail panel for the chosen image (links, caption, name).
 //   actions: { back(), run(fn) → result|null (a structure change, like the
-//   sidebar's), upload(files, of), refine(image, entries), visualStyle() }
+//   sidebar's), upload(files, of), refine(image, entries), visualStyle(), stage() }
 export class LookbookView {
   constructor({ bookId, actions }) {
     this.bookId = bookId;
@@ -184,6 +187,7 @@ export class LookbookView {
         this.countEl,
         h('span', { class: 'spacer' }),
         h('button', { type: 'button', title: 'How every picture of this book should look (codex/visual-style.md)', onclick: () => this.actions.visualStyle() }, 'Visual style'),
+        h('button', { type: 'button', title: 'Put characters in a place and build a prompt for an image generator', onclick: () => this.actions.stage() }, 'Stage a shot'),
         h('button', { type: 'button', class: 'primary', onclick: () => this.add() }, '+ Add images')),
       h('div', { class: 'lookbook-body' }, this.gridEl, this.detailEl));
     acceptDrops(this.el, (files) => this.upload(files));

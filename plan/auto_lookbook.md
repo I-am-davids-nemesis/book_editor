@@ -112,6 +112,8 @@ Step 4 needs part of step 3: the provider interface, the job queue and candidate
 
 ### Step 2: the Stage dialog
 
+**Built.** Differences from the plan below: the prompt is assembled in the browser by `assembleShot` in `public/js/worldmodel.js` (shared, tested in node), not in a `server/stage.js`; step 4's job API will take the assembled prompt and references. The brief uses a general read-only `ClaudeService.ask()` at `POST /books/:id/claude/ask` (token required, Read/Glob/Grep inside the book only, no session, no commit), with its prompt in `codexprompts.js` as `briefPrompt`. Entries with no description or traits are left out of the prompt rather than named bare. **Stage again** waits for step 4, since there are no stored shots before candidates exist. Contact sheets are still undecided.
+
 **Opening it:**
 - From a manuscript scene: **Stage ▾** in the pane toolbar uses the scene. A text selection, if there is one, becomes the moment.
 - From a codex entry's Claude menu, with that entry preselected.
