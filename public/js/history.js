@@ -252,7 +252,8 @@ export class HistoryView {
     const more = this.more ? h('button', { type: 'button', class: 'load-older', onclick: () => this.load({ older: true }) }, 'Load older') : null;
     const svg = this.drawGraph(rows, graphW);
     const inner = h('div', { class: 'hrows', role: 'listbox', 'aria-label': 'Commits' }, svg, items);
-    this.listEl.replaceChildren(inner, more, !rows.length ? h('p', { class: 'muted empty-history' }, 'No commits yet.') : null);
+    const empty = !rows.length ? h('p', { class: 'muted empty-history' }, 'No commits yet.') : null;
+    this.listEl.replaceChildren(...[inner, more, empty].filter(Boolean));
     this.markSelection();
   }
 
