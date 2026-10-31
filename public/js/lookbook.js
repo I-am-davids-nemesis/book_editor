@@ -2,7 +2,7 @@ import { api } from './api.js';
 import { IMAGE_TOOLS, imagePromptFrom } from './codexprompts.js';
 import { confirmDialog, promptDialog } from './dialogs.js';
 import { jobReduce, jobStatus, watchJob } from './generate.js';
-import { handoffDialog, loadVisualStyle } from './handoff.js';
+import { handoffDialog, loadVisualStyle, pendingHandoff } from './handoff.js';
 import { splitMade } from './provenance.js';
 import { codexEntries, imagesByEntry } from './tree.js';
 import { bookHref, h, imageSrc, showMenu, toast } from './ui.js';
@@ -24,9 +24,14 @@ function readBase64(file) {
 }
 
 // Uploads files to the lookbook, each linked to the codex entries in `of`.
-// Returns a structure-change result for everything that was added; files that
-// fail are reported in a toast and skipped.
+// Files that follow a recent handoff on the same entries are taken to be its
+// result: the note says how they were made, and images dropped with no entry
+// are linked to the shot's. Returns a structure-change result for everything
+// that was added; files that fail are reported in a toast and skipped.
 export async function uploadImages(bookId, files, { of = [] } = {}) {
+  const pending = pendingHandoff(bookId, of);
+  const handoff = pending && { tool: pending.tool, prompt: pending.prompt, refs: pending.refs, shot: pending.shot };
+  if (pending && !of.length) of = pending.of;
   const created = [];
   const paths = [];
   const failed = [];
@@ -36,7 +41,7 @@ export async function uploadImages(bookId, files, { of = [] } = {}) {
       continue;
     }
     try {
-      const res = await api.addImage(bookId, { filename: file.name, data: await readBase64(file), of });
+      const res = await api.addImage(bookId, { filename: file.name, data: await readBase64(file), of, handoff });
       created.push(...res.created);
       paths.push(res.path);
     } catch (err) {
@@ -44,6 +49,7 @@ export async function uploadImages(bookId, files, { of = [] } = {}) {
     }
   }
   if (failed.length) toast(failed.join(' · '), { error: true, ms: 8000 });
+  else if (handoff && paths.length) toast(`Noted as made with ${handoff.tool} from the prompt you copied`);
   return { moves: [], created, deleted: [], paths };
 }
 
@@ -365,7 +371,7 @@ export class LookbookView {
           title: linked.some((e) => !e.missing) ? 'Claude looks at this image and adds what it settles to the linked entries’ descriptions' : 'Link the image to a codex entry first',
           onclick: () => this.actions.refine(img, linked.filter((e) => !e.missing)),
         }, 'Refine descriptions from this image')),
-      img.made ? h('div', { class: 'dialog-buttons' },
+      img.staged ? h('div', { class: 'dialog-buttons' },
         h('button', { type: 'button', title: 'Open the shot this image was generated from in the Stage dialog', onclick: () => this.stageAgain(img) }, 'Stage again')) : null,
       h('div', { class: 'dialog-buttons' },
         img.hasNote ? h('a', { class: 'button', href: bookHref(this.bookId, 'codex', img.notePath), title: 'Edit the note beside the image as text' }, 'Open note') : null,

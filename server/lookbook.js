@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { badRequest, conflict, notFound } from './errors.js';
+import { git, isRepo } from './git.js';
 import { slugify, titleize } from './names.js';
 import { resolveInBook } from './paths.js';
 import { applyMoves } from './structure.js';
@@ -159,8 +160,9 @@ async function walkImages(root, rel) {
 }
 
 // Every image in the lookbook, by name:
-//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, use, view, variant, made, size, mtime }]
-// `made` says the note records how the image was generated.
+//   [{ path, name, title, notePath, hasNote, of: [codex paths], caption, use, view, variant, made, staged, size, mtime }]
+// `made` says the note records how the image was generated; `staged`, that it
+// was from a staged shot, which Stage again can open.
 export async function listLookbook(root) {
   const items = [];
   for (const rel of await walkImages(root, LOOKBOOK)) {
@@ -175,7 +177,7 @@ export async function listLookbook(root) {
       notePath,
       hasNote: note !== null,
       ...parseNote(note ?? '', name),
-      made: splitMade(note ?? '').raw !== '',
+      ...(({ raw, made }) => ({ made: raw !== '', staged: Boolean(made?.shot) }))(splitMade(note ?? '')),
       size: stat.size,
       mtime: Math.round(stat.mtimeMs),
     });
@@ -250,15 +252,45 @@ export async function freeName(root, slug, ext) {
   return `${LOOKBOOK}/${base}.${ext}`;
 }
 
+// The commit each reference was last changed in, so a note says exactly which
+// version of a reference an image was made from.
+export async function commitsOf(root, rels) {
+  if (!(await isRepo(root))) return rels.map(() => null);
+  return Promise.all(rels.map((rel) => git(root, ['log', '-1', '--format=%H', '--', rel]).then((s) => s.trim() || null, () => null)));
+}
+
+const MAX_HANDOFF_PROMPT = 20000;
+
+// "How it was made" for a picture made outside the editor from a handoff:
+// { tool, prompt, refs: [lookbook paths], shot }. Null without one.
+async function handoffMade(root, handoff) {
+  if (handoff == null) return null;
+  const { tool, prompt, refs = [], shot } = handoff;
+  if (typeof tool !== 'string' || !tool.trim() || tool.length > 60) throw badRequest('`handoff.tool` must name the generator');
+  if (typeof prompt !== 'string' || prompt.length > MAX_HANDOFF_PROMPT) throw badRequest('`handoff.prompt` must be the prompt that was copied');
+  if (!Array.isArray(refs) || refs.some((p) => typeof p !== 'string' || !isImagePath(p))) throw badRequest('`handoff.refs` must list lookbook images');
+  const commits = await commitsOf(root, refs);
+  return {
+    provider: 'handoff',
+    tool: tool.trim(),
+    prompt,
+    references: refs.map((p, k) => ({ path: p, commit: commits[k] })),
+    ...(shot && typeof shot === 'object' ? { shot } : {}),
+    made: new Date().toISOString(),
+  };
+}
+
 // Adds an image sent as base64. Its name comes from `filename` (or `name`),
-// its extension from its content.
-export async function addImage(root, { filename, name, data, of = [], caption = '' } = {}) {
+// its extension from its content. `handoff` says how it was made, if it came
+// back from an outside generator.
+export async function addImage(root, { filename, name, data, of = [], caption = '', handoff = null } = {}) {
   if (typeof data !== 'string' || !data) throw badRequest('Missing image data');
   const buf = Buffer.from(data, 'base64');
   if (buf.length > MAX_IMAGE_BYTES) throw badRequest(`Images can be at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB`);
   const ext = sniffImage(buf);
   if (!ext) throw badRequest('That isn’t a PNG, JPEG, GIF, WebP or AVIF image');
   const links = await checkLinks(root, of);
+  const made = await handoffMade(root, handoff);
   const slug = slugify(String(name || filename || '').replace(/\.[^.]+$/, '')) || 'image';
 
   await fs.mkdir(path.join(root, LOOKBOOK), { recursive: true });
@@ -270,7 +302,7 @@ export async function addImage(root, { filename, name, data, of = [], caption = 
     if (err.code === 'EEXIST') throw conflict(`${rel} already exists`);
     throw err;
   }
-  const created = [rel, ...(await saveNote(root, rel, { of: links, caption: String(caption).trim() }))];
+  const created = [rel, ...(await saveNote(root, rel, { of: links, caption: String(caption).trim(), made }))];
   return { path: rel, moves: [], created, deleted: [] };
 }
 

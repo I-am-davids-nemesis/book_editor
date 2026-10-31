@@ -4,9 +4,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { deleteCodexEntry, renameCodexEntry } from '../server/codex.js';
 import {
-  addImage, deleteImage, listLookbook, parseNote, sniffImage, updateImage, writeNote,
+  addImage, deleteImage, listLookbook, notePathOf, parseNote, sniffImage, updateImage, writeNote,
 } from '../server/lookbook.js';
 import { buildTree } from '../server/tree.js';
+import { splitMade } from '../public/js/provenance.js';
 import { listFiles, tempDir, writeFiles } from './helpers.js';
 
 // The smallest valid PNG: a 1×1 transparent pixel.
@@ -96,6 +97,33 @@ test('adding an image names it from the file, sniffs its type and writes its not
   assert.deepEqual([first.path, first.of, first.caption, first.hasNote], ['lookbook/tor-at-the-well.png', ['codex/characters/tor.md'], 'Dawn.', true]);
   assert.deepEqual([second.of, second.hasNote], [[], false]);
   assert.equal((await buildTree(root)).lookbook.length, 2);
+});
+
+test('an image from a handoff says how it was made', async () => {
+  const root = await book();
+  const { path: ref } = await addImage(root, { filename: 'tor face.png', data: PNG.toString('base64'), of: ['codex/characters/tor.md'] });
+  const shot = { location: 'codex/locations/washing-house.md', characters: [{ path: 'codex/characters/tor.md', variant: '' }] };
+  const { path: rel } = await addImage(root, {
+    filename: 'ChatGPT Image.png', data: PNG.toString('base64'), of: ['codex/characters/tor.md'],
+    handoff: { tool: 'ChatGPT', prompt: 'Tor at the well.', refs: [ref], shot },
+  });
+  const { made } = splitMade(await read(root, notePathOf(rel)));
+  assert.equal(made.provider, 'handoff');
+  assert.equal(made.tool, 'ChatGPT');
+  assert.equal(made.prompt, 'Tor at the well.');
+  assert.deepEqual(made.references, [{ path: ref, commit: null }]); // not a git repo
+  assert.deepEqual(made.shot, shot);
+  const byPath = new Map((await listLookbook(root)).map((i) => [i.path, i]));
+  assert.deepEqual([byPath.get(rel).made, byPath.get(rel).staged], [true, true]);
+  assert.deepEqual([byPath.get(ref).made, byPath.get(ref).staged], [false, false]);
+
+  // From an entry's handoff there's no shot, so nothing for Stage again.
+  const { path: plain } = await addImage(root, { filename: 'x.png', data: PNG.toString('base64'), handoff: { tool: 'Gemini', prompt: 'p', refs: [] } });
+  const item = (await listLookbook(root)).find((i) => i.path === plain);
+  assert.deepEqual([item.made, item.staged], [true, false]);
+
+  await assert.rejects(addImage(root, { filename: 'y.png', data: PNG.toString('base64'), handoff: { prompt: 'p' } }), /handoff.tool/);
+  await assert.rejects(addImage(root, { filename: 'y.png', data: PNG.toString('base64'), handoff: { tool: 'ChatGPT', prompt: 'p', refs: ['codex/characters/tor.md'] } }), /handoff.refs/);
 });
 
 test('refuses non-images, oversize files and links outside the codex', async () => {

@@ -83,7 +83,7 @@ export const api = {
   reorder: (id, chapter, order) => request('POST', `${book(id)}/reorder`, { chapter, order }),
   createMissing: (id, path) => request('POST', `${book(id)}/create-missing`, { path }),
 
-  addImage: (id, { filename, data, of }) => request('POST', `${book(id)}/lookbook`, { filename, data, of }),
+  addImage: (id, { filename, data, of, handoff }) => request('POST', `${book(id)}/lookbook`, { filename, data, of, handoff }),
   updateImage: (id, path, changes) => request('PATCH', `${book(id)}/lookbook`, { path, ...changes }),
   deleteImage: (id, path) => request('DELETE', `${book(id)}/lookbook?path=${encodeURIComponent(path)}`),
   handoff: (id, paths, name) => request('POST', `${book(id)}/handoff`, { paths, name }),

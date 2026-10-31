@@ -249,7 +249,7 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry, onCan
 
   return new Promise((resolve) => {
     const name = () => shot.characters.map((c) => byPath.get(c.path)?.title).filter(Boolean).join(' and ') || byPath.get(shot.location)?.title || 'shot';
-    const buttons = handoffButtons({ bookId, name, promptEl, getRefs: () => references().chosen.map((c) => c.img), after: ', then drop the result in the Lookbook' });
+    const buttons = handoffButtons({ bookId, name, promptEl, getRefs: () => references().chosen.map((c) => c.img), getShot: () => ({ shot: structuredClone(shot), of: [shot.location, ...shot.characters.map((c) => c.path)].filter(Boolean) }), after: ', then drop the result in the Lookbook' });
     const field = (label, ...children) => h('div', { class: 'field' }, h('span', { class: 'field-label' }, label), children);
     const dialog = h('dialog', { class: 'dialog stage-dialog' },
       h('form', { method: 'dialog' },

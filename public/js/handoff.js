@@ -35,6 +35,35 @@ export function referenceItems(bookId, items, onToggle) {
   });
 }
 
+// The last prompt handed to an outside generator, per book, so the picture
+// that comes back can say how it was made. Kept in localStorage so a reload
+// while the generator works doesn't lose it.
+const PENDING_KEY = (bookId) => `handoff:${bookId}`;
+const PENDING_HOURS = 3;
+
+function rememberHandoff(bookId, pending) {
+  try {
+    localStorage.setItem(PENDING_KEY(bookId), JSON.stringify({ ...pending, at: Date.now() }));
+  } catch {
+    // No storage: the result just won't say how it was made.
+  }
+}
+
+// The handoff that images being added came from, or null:
+// { tool, prompt, refs, shot, of }. Images linked to none of its entries
+// aren't its result; images linked to nothing are taken to be.
+export function pendingHandoff(bookId, of = []) {
+  let pending = null;
+  try {
+    pending = JSON.parse(localStorage.getItem(PENDING_KEY(bookId)) ?? 'null');
+  } catch {
+    return null;
+  }
+  if (!pending || Date.now() - pending.at > PENDING_HOURS * 3600 * 1000) return null;
+  if (of.length && !of.some((p) => pending.of.includes(p))) return null;
+  return pending;
+}
+
 async function copyPrompt(promptEl) {
   try {
     await navigator.clipboard.writeText(promptEl.value);
@@ -48,8 +77,10 @@ async function copyPrompt(promptEl) {
 
 // The buttons that hand a prompt and its images to an outside generator:
 // copy, show the images in Finder (numbered), and copy-and-open each tool.
-//   getRefs() → [img] in order   tool: the one to favor, or null
-export function handoffButtons({ bookId, name, promptEl, getRefs, tool = null, after = '' }) {
+// Copy and open remembers the handoff for the picture that comes back.
+//   getRefs() → [img] in order   getShot() → { shot, of: [codex paths] }
+//   tool: the one to favor, or null
+export function handoffButtons({ bookId, name, promptEl, getRefs, getShot, tool = null, after = '' }) {
   const finder = IS_MAC ? h('button', {
     type: 'button',
     title: 'Copy the chosen images to a folder, numbered in prompt order, and open it',
@@ -68,6 +99,8 @@ export function handoffButtons({ bookId, name, promptEl, getRefs, tool = null, a
     class: t === (tool ?? IMAGE_TOOLS[0]) ? 'primary' : null,
     onclick: async () => {
       if (!(await copyPrompt(promptEl))) return;
+      const { shot = null, of } = getShot();
+      rememberHandoff(bookId, { tool: t.label, prompt: promptEl.value, refs: getRefs().map((img) => img.path), shot, of });
       window.open(t.url, '_blank', 'noopener');
       toast(`Prompt copied. Paste it into ${t.label}, attach the numbered images${after}.`, { ms: 8000 });
     },
@@ -112,7 +145,7 @@ export async function handoffDialog({ bookId, entry, text, images, tool = null }
   };
 
   return new Promise((resolve) => {
-    const buttons = handoffButtons({ bookId, name: () => entry.title, promptEl, getRefs: selected, tool, after: `, then drop the result on “${entry.title}”` });
+    const buttons = handoffButtons({ bookId, name: () => entry.title, promptEl, getRefs: selected, getShot: () => ({ of: [entry.path] }), tool, after: `, then drop the result on “${entry.title}”` });
     const dialog = h('dialog', { class: 'dialog handoff-dialog' },
       h('form', { method: 'dialog' },
         h('h2', {}, `Prepare “${entry.title}” for an image generator`),

@@ -1,8 +1,7 @@
 import path from 'node:path';
 import { excludeCandidates, newJobId, pruneCandidates, writeCandidate } from '../candidates.js';
 import { badRequest, notFound } from '../errors.js';
-import { git, isRepo } from '../git.js';
-import { isImagePath, LOOKBOOK, requireExists } from '../lookbook.js';
+import { commitsOf, isImagePath, LOOKBOOK, requireExists } from '../lookbook.js';
 import { resolveInBook } from '../paths.js';
 import { Limiter } from './limits.js';
 
@@ -67,13 +66,6 @@ class Job {
   get summary() {
     return { id: this.id, provider: this.provider.id, model: this.model, n: this.n, status: this.status, images: this.images };
   }
-}
-
-// The commit each reference was last changed in, so a candidate's note says
-// exactly which version of a reference it was made from.
-async function commitsOf(root, rels) {
-  if (!(await isRepo(root))) return rels.map(() => null);
-  return Promise.all(rels.map((rel) => git(root, ['log', '-1', '--format=%H', '--', rel]).then((s) => s.trim() || null, () => null)));
 }
 
 async function checkRefs(root, refs) {
