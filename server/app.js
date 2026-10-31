@@ -423,12 +423,13 @@ export function createApp({
     res.json({ text: await claude.ask(await bookRoot(req), req.body?.prompt, { signal: abort.signal, model: modelsFrom(req.config).model }) });
   });
 
-  // Gather's first reader: copies an entry's passages out of the scenes that
-  // name it into a scratch file the Gather run then reads.
+  // The first reader: copies an entry's passages (purpose 'describe', for
+  // Gather) or appearances ('appear', for manuscript suggestions) out of the
+  // scenes that name it into a scratch file the run then reads.
   claudeRoutes.post('/passages', async (req, res) => {
     const abort = new AbortController();
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
-    res.json(await findPassages(claude, await bookRoot(req), req.body?.entry, { signal: abort.signal, model: modelsFrom(req.config).finderModel }));
+    res.json(await findPassages(claude, await bookRoot(req), req.body?.entry, { signal: abort.signal, model: modelsFrom(req.config).finderModel, purpose: req.body?.purpose }));
   });
 
   claudeRoutes.delete('/session', async (req, res) => {

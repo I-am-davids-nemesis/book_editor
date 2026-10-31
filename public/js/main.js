@@ -502,7 +502,7 @@ class BookView {
         traits: () => this.askClaude(fixedTraitsPrompt(entry)),
         look: () => this.askClaude(lookPrompt(entry)),
         refine: (images) => this.askClaude(refinePrompt([entry], images), { images: true }),
-        manuscript: () => this.askClaude(manuscriptPrompt(entry)),
+        manuscript: () => this.suggestEdits(entry),
       },
     }) : null);
   }
@@ -510,31 +510,54 @@ class BookView {
   // Gather: the editor finds the scenes that name the entry, a small model
   // copies the passages that describe it out of them, and Claude writes the
   // Description from those. If the first reader fails, Claude reads the
-  // scenes itself. Saved first, so new aliases count.
+  // scenes itself.
   async gather(entry) {
-    if (this.claude.runId) return this.askClaude('');
-    if (this.gathering) return toast('Still finding passages for the last Gather');
-    if (this.dirty && !(await this.save())) return;
-    toast(`Finding passages about ${entry.title}…`, { ms: 10 * 60 * 1000 });
-    let found;
-    let passages = null;
-    this.gathering = true;
-    try {
-      passages = await api.claudePassages(this.id, entry.path);
-      found = passages.found;
-    } catch (err) {
-      toast(`The first reader failed (${err.message}); Claude will read the scenes itself`, { error: true });
+    const read = await this.firstReader(entry, 'describe', `passages about ${entry.title}`, 'passages');
+    if (!read) return;
+    let { found, passages } = read;
+    if (!found) {
       try {
         found = await api.mentions(this.id, entry.path);
-      } catch (err2) {
-        toast(err2.message, { error: true });
-        return;
+      } catch (err) {
+        return toast(err.message, { error: true });
       }
+    }
+    this.askClaude(gatherPrompt(entry, found, passages));
+  }
+
+  // Suggest manuscript edits: the first reader copies out every place the
+  // entry appears, and Claude suggests from those. If it fails, Claude
+  // searches the manuscript itself.
+  async suggestEdits(entry) {
+    const read = await this.firstReader(entry, 'appear', `where ${entry.title} appears`, 'places');
+    if (read) this.askClaude(manuscriptPrompt(entry, read.passages));
+  }
+
+  // Runs the first reader on an entry (saved first, so new aliases count).
+  // Resolves with { found, passages }, both null if the reader failed, or
+  // with null when the caller should stop (a run is busy, or a save failed).
+  async firstReader(entry, purpose, finding, noun) {
+    if (this.claude.runId) {
+      this.askClaude('');
+      return null;
+    }
+    if (this.gathering) {
+      toast('Still finding passages for the last request');
+      return null;
+    }
+    if (this.dirty && !(await this.save())) return null;
+    toast(`Finding ${finding}…`, { ms: 10 * 60 * 1000 });
+    this.gathering = true;
+    try {
+      const passages = await api.claudePassages(this.id, entry.path, purpose);
+      if (passages.file) toast(`${passages.count} ${noun} found${passages.failed ? `; ${passages.failed} batches of scenes couldn't be read` : ''}`);
+      return { found: passages.found, passages };
+    } catch (err) {
+      toast(`The first reader failed (${err.message}); Claude will read the scenes itself`, { error: true });
+      return { found: null, passages: null };
     } finally {
       this.gathering = false;
     }
-    if (passages?.file) toast(`${passages.count} passages found${passages.failed ? `; ${passages.failed} batches of scenes couldn't be read` : ''}`);
-    this.askClaude(gatherPrompt(entry, found, passages));
   }
 
   // The Stage dialog, for a picture of a moment. Entry texts come from the

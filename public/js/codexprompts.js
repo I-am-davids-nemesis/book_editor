@@ -131,13 +131,23 @@ ${SECTION_FORMAT}
 Don't change anything in manuscript/ or outline/. In the panel, list what you added and the conflicts you found, briefly.`;
 }
 
+// Where the suggestions come from. With `passages` (the first reader's file
+// of every place the entry appears), Claude works from it and opens only the
+// scenes it suggests changing; else it searches the manuscript itself.
+function manuscriptSources(entry, passages) {
+  if (passages?.file && passages.count) {
+    return `A first reader has already gone through the ${passages.found.scenes.length} scenes that name ${entry.title} (or come right before or after one that does) and copied out ${passages.count} places where ${entry.title} appears, each checked word for word against its scene. Each is marked "first" (the first time in that scene), "describes" or "no detail". They are in ${passages.file}, with their scene paths. Read that file and work from it; don't search the manuscript again.`;
+  }
+  return `Find the passages in manuscript/ where ${entry.title} appears or is described. Search for its other names too: the \`aliases:\` list in the entry's front matter, if it has one.`;
+}
+
 // Claude proposes manuscript changes from the entry's Description, without
 // making them.
-export function manuscriptPrompt(entry) {
+export function manuscriptPrompt(entry, passages = null) {
   return `Using the "## ${DESCRIPTION}" section of ${entry.path}, suggest ways to enrich how the manuscript describes ${entry.title}.
 
-1. Find the passages in manuscript/ where ${entry.title} appears or is described.
-2. Pick the places where a detail from the description would help: a first appearance with little description, a scene that contradicts the description, or a moment where a sensory detail would land. Don't suggest more than one detail per scene unless the scene needs it, and keep the prose's voice and the scene's point of view.
+1. ${manuscriptSources(entry, passages)}
+2. Pick the places where a detail from the description would help: a first appearance with little description, a scene that contradicts the description, or a moment where a sensory detail would land. Don't suggest more than one detail per scene unless the scene needs it, and keep the prose's voice and the scene's point of view. Before suggesting a change to a scene, open it and read around the sentence.
 3. Don't edit any files yet. In the panel, list numbered suggestions, each with the file path, the original sentence quoted, and the revised sentence.
 
 I'll tell you which suggestions to apply.`;

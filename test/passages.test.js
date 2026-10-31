@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { ClaudeService } from '../server/claude.js';
 import { batches, findPassages, normalize, parsePassages, quoteIn } from '../server/passages.js';
-import { gatherPrompt } from '../public/js/codexprompts.js';
+import { gatherPrompt, manuscriptPrompt } from '../public/js/codexprompts.js';
 import { tempDir, writeFiles } from './helpers.js';
 
 test('quotes match despite typographic quotes, emphasis, line breaks and elisions', () => {
@@ -87,4 +87,32 @@ test('Gather works from the passages file when there is one', () => {
   assert.doesNotMatch(p, /The editor searched the manuscript/);
   // With no passages, Claude reads the scenes itself.
   assert.match(gatherPrompt(tor, found, { found, file: '/x.md', count: 0 }), /The editor searched the manuscript for “Tor”/);
+});
+
+test('for manuscript suggestions, the first reader copies out every place the entry appears', async () => {
+  const root = await tempDir();
+  await writeFiles(root, {
+    'codex/characters/tor.md': '# Tor\n',
+    'manuscript/01-one/01-a.md': 'Tor came in. He sat.\n',
+  });
+  const claude = new ClaudeService({ storeDir: await tempDir(), log: { error() {} } });
+  const prompts = [];
+  claude.complete = async (r, prompt) => {
+    prompts.push(prompt);
+    return JSON.stringify([{ file: 'manuscript/01-one/01-a.md', quote: 'Tor came in.', note: 'first, no detail' }]);
+  };
+  const r = await findPassages(claude, root, 'codex/characters/tor.md', { purpose: 'appear' });
+  assert.match(prompts[0], /Copy out every place where Tor appears: the first time in each scene/);
+  assert.doesNotMatch(prompts[0], /Leave out passages that only name/);
+  assert.equal(path.basename(r.file), 'appearances-codex-characters-tor.md');
+  assert.match(await fs.readFile(r.file, 'utf8'), /^# Where Tor appears\n[\s\S]*for manuscript suggestions[\s\S]*- “Tor came in.” \(first, no detail\)/);
+  await assert.rejects(findPassages(claude, root, 'codex/characters/tor.md', { purpose: 'other' }), /Unknown purpose/);
+
+  const tor = { path: 'codex/characters/tor.md', title: 'Tor', kind: 'character' };
+  const p = manuscriptPrompt(tor, { ...r, file: '/cfg/scratch/appearances-tor.md' });
+  assert.match(p, /copied out 1 places where Tor appears/);
+  assert.match(p, /\/cfg\/scratch\/appearances-tor\.md/);
+  assert.match(p, /open it and read around the sentence/);
+  // Without the file, Claude searches the manuscript itself.
+  assert.match(manuscriptPrompt(tor), /Find the passages in manuscript\//);
 });

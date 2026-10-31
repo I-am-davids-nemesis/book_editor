@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DEFAULT_FINDER_MODEL } from './claude.js';
+import { badRequest } from './errors.js';
 import { entryScenes } from './mentions.js';
 
-// Gather's first reader: a small model reads the scenes that name a codex
-// entry (see mentions.js) and copies out every passage that describes it.
+// The first reader: a small model reads the scenes that name a codex entry
+// (see mentions.js) and copies out every passage that describes it, for
+// Gather, or every place it appears, for manuscript suggestions.
 // No model writes anything here; the editor checks each quote word for word
 // against its scene, drops the ones that don't match, and writes the rest to
 // a scratch file outside the book for the Gather run to work from.
@@ -23,20 +25,35 @@ const KIND_FOCUS = {
 
 const SYSTEM = 'You copy passages out of a novel\'s scenes, exactly as written. You never paraphrase, invent or fix a quote. You answer with JSON only.';
 
-export function finderPrompt(entry, names, scenes) {
+// What the reader copies out, by purpose: 'describe' for Gather, 'appear'
+// for suggesting manuscript edits (which needs the bare mentions too).
+const ASK = {
+  describe: (entry, focus) => `Copy out every passage that describes ${entry.title}: ${focus}.`,
+  appear: (entry, focus) => `Copy out every place where ${entry.title} appears: the first time in each scene, every passage that describes ${entry.title} (${focus}), and the moments where ${entry.title} is present, acts or is looked at but the text gives no detail.`,
+};
+const SKIP = {
+  describe: (entry) => `- Leave out passages that only name ${entry.title} without describing anything.`,
+  appear: (entry) => `- Give each moment once; in a long stretch about ${entry.title}, copy the sentences that matter most.`,
+};
+const NOTE = {
+  describe: (entry) => `a few words: what it tells about ${entry.title}; for an indirect reference, how you know it's them`,
+  appear: (entry) => `start with "first", "describes" or "no detail", then a few words: what it tells about ${entry.title}, or what is happening`,
+};
+
+export function finderPrompt(entry, names, scenes, purpose = 'describe') {
   const focus = KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note;
   const text = scenes.map((s) => `<scene file="${s.file}">\n${s.text.trim()}\n</scene>`).join('\n\n');
   return `${text}
 
-Above are scenes from a novel. Copy out every passage that describes ${entry.title} (a ${entry.kind}, also called ${names.map((n) => `“${n}”`).join(', ')}): ${focus}.
+Above are scenes from a novel. ${entry.title} is a ${entry.kind}, also called ${names.map((n) => `“${n}”`).join(', ')}. ${ASK[purpose](entry, focus)}
 
 - Include indirect references (a pronoun, "the yard", a title) only when the scene makes clear they mean ${entry.title}.
 - Include what others say or notice about ${entry.title}, and comparisons ("taller than Davie").
-- Leave out passages that only name ${entry.title} without describing anything.
+${SKIP[purpose](entry)}
 - Copy each quote exactly, character for character, one to three sentences. Don't join text from different places into one quote.
 
 Answer with only a JSON array, [] if there is nothing:
-[{"file": "<the scene's file, as given>", "quote": "<exact text>", "note": "<a few words: what it tells about ${entry.title}; for an indirect reference, how you know it's them>"}]`;
+[{"file": "<the scene's file, as given>", "quote": "<exact text>", "note": "<${NOTE[purpose](entry)}>"}]`;
 }
 
 // Text as compared: typographic quotes and dashes made plain, emphasis marks
@@ -99,14 +116,16 @@ async function inParallel(items, n, fn) {
   return results;
 }
 
-const fileName = (entryPath) => `passages-${entryPath.replace(/\.md$/, '').replace(/[^\w-]+/g, '-')}.md`;
+const fileName = (entryPath, purpose) => `${purpose === 'appear' ? 'appearances' : 'passages'}-${entryPath.replace(/\.md$/, '').replace(/[^\w-]+/g, '-')}.md`;
 
-// Finds a codex entry's passages and writes them to the scratch file.
+// Finds a codex entry's passages (or, with purpose 'appear', every place it
+// appears) and writes them to the scratch file.
 // Resolves with { found, file, count, dropped, failed }: `found` is
 // entryScenes' answer; `file` is null when there were no scenes to read (or
 // too many), and Gather falls back to reading on its own. `failed` counts
 // batches the model couldn't answer; their scenes are listed as unread.
-export async function findPassages(claude, root, entryPath, { model = DEFAULT_FINDER_MODEL, signal } = {}) {
+export async function findPassages(claude, root, entryPath, { model = DEFAULT_FINDER_MODEL, signal, purpose = 'describe' } = {}) {
+  if (!ASK[purpose]) throw badRequest(`Unknown purpose: ${purpose}`);
   const found = await entryScenes(root, entryPath);
   const entry = { path: entryPath, title: found.title, kind: found.kind };
   if (!found.scenes.length) return { found, file: null, count: 0, dropped: 0, failed: 0 };
@@ -119,7 +138,7 @@ export async function findPassages(claude, root, entryPath, { model = DEFAULT_FI
   const unread = new Set();
   const answers = await inParallel(batches(files.filter((f) => f.text.trim())), PARALLEL, async (batch) => {
     try {
-      return { batch, list: parsePassages(await claude.complete(root, finderPrompt(entry, found.names, batch), { model, signal, system: SYSTEM, timeoutMs: BATCH_TIMEOUT_MS })) };
+      return { batch, list: parsePassages(await claude.complete(root, finderPrompt(entry, found.names, batch, purpose), { model, signal, system: SYSTEM, timeoutMs: BATCH_TIMEOUT_MS })) };
     } catch (err) {
       if (signal?.aborted) throw err;
       failed++;
@@ -146,9 +165,9 @@ export async function findPassages(claude, root, entryPath, { model = DEFAULT_FI
 
   const count = [...kept.values()].reduce((n, q) => n + q.length, 0);
   const lines = [
-    `# Passages about ${entry.title}`,
+    `# ${purpose === 'appear' ? 'Where' : 'Passages about'} ${entry.title}${purpose === 'appear' ? ' appears' : ''}`,
     '',
-    `Copied out of ${found.scenes.length} scenes by ${model} for Gather, on ${new Date().toLocaleDateString('sv')}. The editor searched for ${found.names.map((n) => `“${n}”`).join(', ')} and kept the scenes that name ${entry.title}, plus the scene before and after each. Every quote below was checked word for word against its scene${dropped ? `; ${dropped} that didn't match were dropped` : ''}.`,
+    `Copied out of ${found.scenes.length} scenes by ${model} for ${purpose === 'appear' ? 'manuscript suggestions' : 'Gather'}, on ${new Date().toLocaleDateString('sv')}. The editor searched for ${found.names.map((n) => `“${n}”`).join(', ')} and kept the scenes that name ${entry.title}, plus the scene before and after each. Every quote below was checked word for word against its scene${dropped ? `; ${dropped} that didn't match were dropped` : ''}.`,
     '',
   ];
   for (const f of files) {
@@ -164,7 +183,7 @@ export async function findPassages(claude, root, entryPath, { model = DEFAULT_FI
 
   const dir = claude.scratchDir(root);
   await fs.mkdir(dir, { recursive: true });
-  const file = path.join(dir, fileName(entry.path));
+  const file = path.join(dir, fileName(entry.path, purpose));
   await fs.writeFile(file, lines.join('\n'));
   return { found, file, count, dropped, failed };
 }
