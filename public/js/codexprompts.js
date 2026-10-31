@@ -55,7 +55,10 @@ function gatherSources(entry, found) {
     return `Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${focus}. Search for its other names too: the \`aliases:\` list in the entry's front matter, if it has one.`;
   }
   const scenes = found.scenes.map((s) => `   - ${s.chapter}, “${s.title}”${s.hits ? '' : ' (next to a scene that names it)'}: ${s.files.join(', ')}`).join('\n');
-  return `The editor searched the manuscript for ${found.names.map((n) => `“${n}”`).join(', ')}. These scenes name ${entry.title}, or come right before or after one that does. Each scene's files are the same scene in different narration modes; read them all:
+  const read = found.scenes.some((s) => s.files.length > 1)
+    ? 'Where a scene has several files, they are the same scene in different narration modes; read them all.'
+    : 'Read each file.';
+  return `The editor searched the manuscript for ${found.names.map((n) => `“${n}”`).join(', ')}. These scenes name ${entry.title}, or come right before or after one that does${found.mode ? ` (the ${found.mode} version where a scene has one)` : ''}. ${read}
 ${scenes}
 
    Find every passage in them that describes ${entry.title}: ${focus}. Don't search the rest of the manuscript; open another scene only to check a doubtful passage. If these scenes say little, say so under Open questions.`;

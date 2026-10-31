@@ -45,3 +45,20 @@ test('finds the scenes that name an entry, with their neighbors', async () => {
   await assert.rejects(entryScenes(root, 'codex/locations/nope.md'), /No such codex entry/);
   await assert.rejects(entryScenes(root, 'manuscript/02-two/01-c.camera.md'), /Not a codex entry/);
 });
+
+test('the book\'s gather mode keeps one file per scene, but every mode is searched', async () => {
+  const root = await tempDir();
+  await writeFiles(root, {
+    'book.json': '{"gather": {"mode": "third"}}',
+    'codex/characters/tor.md': '# Tor\n',
+    'manuscript/01-one/01-a.camera.md': 'Tor waits.\n',
+    'manuscript/01-one/01-a.third.md': 'He waits.\n',
+    'manuscript/01-one/02-b.md': 'Plain.\n',
+  });
+  const r = await entryScenes(root, 'codex/characters/tor.md');
+  assert.equal(r.mode, 'third');
+  assert.deepEqual(r.scenes.map((s) => [s.hits, s.files]), [
+    [1, ['manuscript/01-one/01-a.third.md']],
+    [0, ['manuscript/01-one/02-b.md']],
+  ]);
+});

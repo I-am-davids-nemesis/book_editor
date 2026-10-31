@@ -96,6 +96,9 @@ test('gather reads only the scenes the editor found, when it found any', () => {
   assert.match(p, /“Later” \(next to a scene that names it\)/);
   assert.match(p, /Don't search the rest of the manuscript/);
   assert.doesNotMatch(p, /every chapter and every narration mode/);
+  assert.match(p, /same scene in different narration modes; read them all/);
+  const one = gatherPrompt(tor, { ...found, mode: 'third', scenes: [{ ...found.scenes[0], files: [found.scenes[0].files[1]] }] });
+  assert.match(one, /\(the third version where a scene has one\)\. Read each file\./);
   for (const none of [null, { names: ['Tor'], scenes: [], tooMany: true }]) {
     assert.match(gatherPrompt(tor, none), /Find every passage in manuscript\/ \(every chapter and every narration mode\)/);
   }
