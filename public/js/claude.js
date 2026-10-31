@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { renderMarkdown } from './pane.js';
-import { ANSWERS_START, answersMessage, questionLabel, questionsIn } from './questions.js';
+import { ANSWERS_START, answersMessage, initialAnswer, isAnswered, parseQuestion, questionLabel, questionsIn } from './questions.js';
 import { h, showMenu, toast } from './ui.js';
 import { countWords } from './wordcount.js';
 
@@ -228,7 +228,7 @@ export class ClaudePanel {
 
   resetRender() {
     this.textEl = null;
-    this.replyEl = null; // the run's last block of text
+    this.replyEls = []; // the run's blocks of text
     this.questionsBar = null; // the last reply's "Answer the questions" bar
     this.tools = new Map();
     this.cards = new Map();
@@ -239,7 +239,7 @@ export class ClaudePanel {
     if (e.type !== 'text') this.textEl = null;
     switch (e.type) {
       case 'start':
-        this.replyEl = null;
+        this.replyEls = [];
         if (e.prompt.startsWith(ANSWERS_START)) this.questionsBar?.markSent();
         this.questionsBar = null;
         this.renderStart(e);
@@ -305,7 +305,7 @@ export class ClaudePanel {
       this.textEl = h('div', { class: 'claude-msg claude-assistant claude-md' });
       this.textEl.markdown = '';
       this.logEl.append(this.textEl);
-      this.replyEl = this.textEl;
+      this.replyEls.push(this.textEl);
     }
     const el = this.textEl;
     el.markdown += text;
@@ -321,13 +321,21 @@ export class ClaudePanel {
     });
   }
 
-  // A finished reply that ends with questions gets a button to answer them
-  // one at a time. Drafts stay with the button until they're sent.
+  // A finished reply with a list of questions gets a button, right after the
+  // block of text that asks them, to answer them one at a time. Drafts stay
+  // with the button until they're sent.
   renderQuestions() {
-    const reply = this.replyEl;
-    const questions = reply ? questionsIn(reply.markdown) : [];
-    if (!questions.length) return;
-    const answers = questions.map(() => '');
+    let reply = null;
+    let questions = [];
+    for (const el of [...this.replyEls].reverse()) {
+      questions = questionsIn(el.markdown).map(parseQuestion);
+      if (questions.length) {
+        reply = el;
+        break;
+      }
+    }
+    if (!reply) return;
+    const answers = questions.map(initialAnswer);
     const n = questions.length;
     const bar = h('div', { class: 'claude-questions' });
     const open = () => answerDialog(questions, answers, {
@@ -475,46 +483,77 @@ export class ClaudePanel {
   }
 }
 
-// Claude's questions, one at a time, each with a box for the answer. Answers
-// are written into `answers` as they're typed, so closing keeps them.
+// Claude's questions, one at a time. A question with suggested answers shows
+// them as choices, its default chosen, with a box for a note; otherwise the
+// box is the answer. Answers are kept in `answers` as they change, so closing
+// keeps them.
+//   questions: [{ text, suggestions }]   answers: [{ choice, note }]
 //   onSend(message) → Promise of true once it's sent
 function answerDialog(questions, answers, { onSend }) {
-  let at = Math.max(0, answers.findIndex((a) => !a.trim()));
+  let at = Math.max(0, answers.findIndex((a) => !isAnswered(a)));
   const counter = h('span', { class: 'muted' });
   const questionEl = h('div', { class: 'claude-md answer-question' });
-  const answerEl = h('textarea', { rows: 5, spellcheck: 'true', 'aria-label': 'Your answer', placeholder: 'Your answer. Leave it empty to skip.' });
+  const choicesEl = h('div', { class: 'answer-choices', role: 'radiogroup', 'aria-label': 'Suggested answers' });
+  const answerEl = h('textarea', { rows: 4, spellcheck: 'true' });
   const navEl = h('div', { class: 'answer-nav', role: 'group', 'aria-label': 'Questions' });
   const backBtn = h('button', { type: 'button', onclick: () => go(at - 1) }, 'Back');
   const nextBtn = h('button', { type: 'button', class: 'primary', onclick: () => go(at + 1) }, 'Next');
   const sendBtn = h('button', { type: 'button', onclick: () => send() }, 'Send answers');
-  const dialog = h('dialog', { class: 'dialog answer-dialog' },
-    h('form', { method: 'dialog' },
-      h('div', { class: 'answer-head' }, h('h2', {}, 'Claude’s questions'), counter),
-      navEl,
-      questionEl,
-      answerEl,
-      h('p', { class: 'field-hint' }, '⌘↩ for the next question. Skipped questions are left out of the reply.'),
-      h('div', { class: 'dialog-buttons' },
-        h('button', { type: 'submit', title: 'Your answers are kept until you send them' }, 'Close'),
-        h('span', { class: 'spacer' }),
-        backBtn, sendBtn, nextBtn)));
+  const form = h('form', { method: 'dialog' },
+    h('div', { class: 'answer-head' }, h('h2', {}, 'Claude’s questions'), counter),
+    navEl,
+    questionEl,
+    choicesEl,
+    answerEl,
+    h('p', { class: 'field-hint' }, '⌘↩ for the next question. Suggested defaults are already chosen; questions with no answer are left out of the reply.'),
+    h('div', { class: 'dialog-buttons' },
+      h('button', { type: 'submit', title: 'Your answers are kept until you send them' }, 'Close'),
+      h('span', { class: 'spacer' }),
+      backBtn, sendBtn, nextBtn));
+  const dialog = h('dialog', { class: 'dialog answer-dialog' }, form);
 
   function show() {
     const last = at === questions.length - 1;
+    const q = questions[at];
+    const a = answers[at];
     counter.textContent = `${at + 1} of ${questions.length}`;
-    questionEl.replaceChildren(renderMarkdown(questions[at]));
-    answerEl.value = answers[at];
+    questionEl.replaceChildren(renderMarkdown(q.text));
+    showChoices();
+    answerEl.value = a.note;
     backBtn.disabled = at === 0;
     nextBtn.hidden = last;
     sendBtn.classList.toggle('primary', last);
-    navEl.replaceChildren(...questions.map((q, i) => h('button', {
+    navEl.replaceChildren(...questions.map((qq, i) => h('button', {
       type: 'button',
-      class: `answer-pill${i === at ? ' current' : ''}${answers[i].trim() ? ' answered' : ''}`,
-      title: questionLabel(q),
+      class: `answer-pill${i === at ? ' current' : ''}${isAnswered(answers[i]) ? ' answered' : ''}`,
+      title: questionLabel(qq.text),
       'aria-current': i === at ? 'step' : null,
       onclick: () => go(i),
     }, String(i + 1))));
     answerEl.focus();
+  }
+  function showChoices() {
+    const { suggestions } = questions[at];
+    const a = answers[at];
+    choicesEl.hidden = !suggestions.length;
+    const choice = (i, kind, text) => h('label', { class: `answer-choice${a.choice === i ? ' chosen' : ''}` },
+      h('input', { type: 'radio', name: 'choice', checked: a.choice === i || null, onchange: () => choose(i) }),
+      h('span', { class: 'answer-kind' }, kind),
+      h('span', {}, text.replace(/\*\*|__/g, '')));
+    choicesEl.replaceChildren(...suggestions.map((sg, i) => choice(i, sg.kind === 'Default' ? 'Default' : 'Option', sg.text)),
+      ...(suggestions.length ? [choice(-1, 'Other', 'My own answer, in the box below')] : []));
+    const own = a.choice < 0;
+    answerEl.placeholder = own ? 'Your answer. Leave it empty to skip.' : 'A note to go with this choice (optional)';
+    answerEl.setAttribute('aria-label', own ? 'Your answer' : 'Note');
+  }
+  function choose(i) {
+    answers[at].choice = i;
+    showChoices();
+    markAnswered();
+    if (i < 0) answerEl.focus();
+  }
+  function markAnswered() {
+    navEl.children[at]?.classList.toggle('answered', isAnswered(answers[at]));
   }
   function go(i) {
     if (i < 0 || i >= questions.length) return;
@@ -533,10 +572,10 @@ function answerDialog(questions, answers, { onSend }) {
   }
 
   answerEl.addEventListener('input', () => {
-    answers[at] = answerEl.value;
-    navEl.children[at]?.classList.toggle('answered', Boolean(answerEl.value.trim()));
+    answers[at].note = answerEl.value;
+    markAnswered();
   });
-  answerEl.addEventListener('keydown', (e) => {
+  form.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
     e.preventDefault();
     if (at === questions.length - 1) send();

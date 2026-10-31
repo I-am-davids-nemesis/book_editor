@@ -738,6 +738,11 @@ svg.graph .lane-5.dot { fill: var(--lane-5); }
 .answer-question { max-height: 40vh; overflow-y: scroll; padding: 8px 10px; border: 1px solid var(--divider); border-radius: 6px; background: var(--surface); }
 .answer-question > :first-child { margin-top: 0; }
 .answer-question > :last-child { margin-bottom: 0; }
+.answer-choices { display: flex; flex-direction: column; gap: 4px; }
+.answer-choice { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border: 1px solid var(--divider); border-radius: 6px; cursor: pointer; }
+.answer-choice.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.answer-choice input { flex: none; margin: 0; align-self: center; }
+.answer-kind { flex: none; width: 56px; font-size: 12px; color: var(--muted); }
 .claude-done { font-size: 11px; text-align: center; padding-bottom: 6px; border-bottom: 1px dashed var(--divider); }
 
 .claude-compose { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 10px; border-top: 1px solid var(--divider); }
