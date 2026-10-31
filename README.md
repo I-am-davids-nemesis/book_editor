@@ -75,7 +75,6 @@ A scene can exist in several modes as `01-opening.camera.md`, `01-opening.rotati
 
 ### In the editor
 
-- Each pane has **Edit / Split / Preview**. The preview renders Markdown and drops anything that could run code.
 - Word counts update as you type: in the status bar (file, plot, chapter) and the sidebar (scene, chapter, book).
 - Sidebar word counts cover the manuscript only.
 
@@ -258,7 +257,6 @@ Press **?** (or **⌘/**) in the editor for this list. On Windows and Linux, ⌘
 | ⌘⇧F | Search the whole book |
 | ⌘⌥↑ / ⌘⌥↓ | Previous / next scene (in the same mode, or plot to plot) |
 | ⌘⌥P | Show or hide the plot (or scene) beside the file |
-| ⌘E | Edit → Split → Preview, in the pane you are in |
 | ⌘⌥H | History |
 | ⌘⌥C | Show or hide the Claude panel |
 | ⌘F | Find in the file |

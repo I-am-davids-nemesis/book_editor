@@ -56,9 +56,7 @@ class BookView {
     const paneOptions = (role) => ({
       bookId: id,
       role,
-      view: readStored(`view:${role}`) || 'edit',
       onChange: (pane) => this.paneChanged(pane),
-      onView: (v) => writeStored(`view:${role}`, v),
       onSaved: () => this.refreshGit(),
       onCloseRequest: (pane) => this.closePane(pane),
       onSelect: () => this.claude?.refreshContext(),
@@ -454,14 +452,6 @@ class BookView {
       }
     }
     toast(dir > 0 ? 'That was the last scene' : 'That was the first scene');
-    return true;
-  }
-
-  cycleView() {
-    const pane = this.side.el.contains(document.activeElement) && !this.side.el.hidden ? this.side : this.main;
-    if (!pane.file && !pane.readOnly) return false;
-    pane.setView({ edit: 'split', split: 'preview', preview: 'edit' }[pane.view]);
-    pane.focus();
     return true;
   }
 
@@ -1275,7 +1265,6 @@ installShortcuts({
   prevScene: () => (bookView ? bookView.stepScene(-1) : false),
   nextScene: () => (bookView ? bookView.stepScene(1) : false),
   companion: () => (bookView && !bookView.companionBtn.hidden ? (bookView.toggleCompanion(), true) : false),
-  cycleView: () => (bookView ? bookView.cycleView() : false),
   history: () => (bookView ? (bookView.openHistory(), true) : false),
   claude: () => (bookView ? (bookView.toggleClaude(), true) : false),
 });

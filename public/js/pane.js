@@ -10,24 +10,20 @@ import { countWords } from './wordcount.js';
 const AUTOSAVE_IDLE_MS = 1000;
 const AUTOSAVE_MAX_WAIT_MS = 5000;
 const AUTOSAVE_RETRY_MS = 10000;
-const PREVIEW_DELAY_MS = 200;
 
-const VIEWS = { edit: 'Edit', split: 'Split', preview: 'Preview' };
-
-// One open file: header, conflict banner, CodeMirror editor and rendered
-// preview. The book screen has two: the main pane (the file in the address
-// bar) and the side pane (its plot file or scene).
+// One open file: header, conflict banner and CodeMirror editor. The book
+// screen has two: the main pane (the file in the address bar) and the side
+// pane (its plot file or scene).
 export class Pane {
   constructor({
-    bookId, role, view = 'edit', headExtras = [],
-    onChange = () => {}, onView = () => {}, onSaved = () => {}, onCloseRequest = () => {}, onSelect = () => {},
+    bookId, role, headExtras = [],
+    onChange = () => {}, onSaved = () => {}, onCloseRequest = () => {}, onSelect = () => {},
   }) {
     this.bookId = bookId;
     this.role = role;
     this.onChange = onChange;
     this.onSaved = onSaved;
     this.onCloseRequest = onCloseRequest;
-    this.onView = onView;
     this.file = null; // { path, hash }
     this.saving = null;
     this.conflicted = false; // a save hit a conflict; autosave waits for the banner
@@ -40,18 +36,14 @@ export class Pane {
     this.pathEl = h('span', { class: 'file-path' });
     this.dirtyEl = h('span', { class: 'dirty-dot', title: 'Unsaved changes', hidden: true });
     this.stateEl = h('span', { class: 'save-state' });
-    this.viewButtons = Object.entries(VIEWS).map(([v, label]) =>
-      h('button', { type: 'button', 'data-view': v, onclick: () => this.setView(v), title: `${label} view` }, label));
     this.saveBtn = h('button', { type: 'button', class: 'save', onclick: () => this.save(), disabled: true, title: 'Save now (⌘S). Edits also save by themselves after a second.' }, 'Save');
     this.headEl = h('div', { class: 'editor-head' },
       this.dirtyEl, this.labelEl, this.titleEl, headExtras, this.pathEl, this.stateEl,
-      h('span', { class: 'segmented view-switch', role: 'group', 'aria-label': 'View' }, this.viewButtons),
       this.saveBtn);
     this.bannerEl = h('div', { class: 'banner', hidden: true });
     this.extraEl = h('div', { class: 'pane-extra', hidden: true });
     this.hostEl = h('div', { class: 'editor-host' });
-    this.previewEl = h('div', { class: 'preview', tabindex: '0', 'aria-label': 'Preview' });
-    this.bodyEl = h('div', { class: 'pane-body', hidden: true }, this.hostEl, this.previewEl);
+    this.bodyEl = h('div', { class: 'pane-body', hidden: true }, this.hostEl);
     this.emptyEl = h('div', { class: 'placeholder' });
     this.el = h('section', { class: `pane pane-${role}`, 'data-role': role },
       this.headEl, this.bannerEl, this.extraEl, this.bodyEl, this.emptyEl);
@@ -60,13 +52,11 @@ export class Pane {
       onChange: () => {
         this.updateStatus();
         this.scheduleAutosave();
-        this.schedulePreview();
         this.onChange(this);
       },
       onSave: () => this.save(),
       onSelect: () => onSelect(this),
     });
-    this.setView(view, { notify: false });
     this.close();
   }
 
@@ -104,7 +94,6 @@ export class Pane {
     this.bodyEl.hidden = false;
     this.emptyEl.hidden = true;
     this.showHeader();
-    this.renderPreview();
     this.updateStatus();
   }
 
@@ -122,7 +111,6 @@ export class Pane {
     this.setLabel(label);
     this.showHeader();
     this.el.classList.add('read-only');
-    this.renderPreview();
     this.updateStatus();
   }
 
@@ -155,8 +143,7 @@ export class Pane {
   }
 
   focus() {
-    if (this.view === 'preview') this.previewEl.focus();
-    else this.editor.focus();
+    this.editor.focus();
   }
 
   // Something shown between the header and the text, such as a codex entry's
@@ -166,10 +153,8 @@ export class Pane {
     this.extraEl.hidden = !node;
   }
 
-  // Selects a search match in the text, switching Preview to Split so the
-  // selection can be seen.
+  // Selects a search match in the text.
   reveal({ line, col, length }) {
-    if (this.view === 'preview') this.setView('split');
     this.editor.reveal(line, col, length);
     this.editor.focus();
   }
@@ -188,33 +173,6 @@ export class Pane {
     this.file.path = m.to + p.slice(m.from.length);
     this.showHeader();
     return 'moved';
-  }
-
-  // --- edit / split / preview -----------------------------------------------
-
-  setView(view, { notify = true } = {}) {
-    this.view = VIEWS[view] ? view : 'edit';
-    this.bodyEl.dataset.view = this.view;
-    for (const b of this.viewButtons) b.setAttribute('aria-pressed', String(b.dataset.view === this.view));
-    this.renderPreview();
-    if (notify) this.onView(this.view);
-  }
-
-  schedulePreview() {
-    if (this.view === 'edit') return;
-    clearTimeout(this.previewTimer);
-    this.previewTimer = setTimeout(() => this.renderPreview(), PREVIEW_DELAY_MS);
-  }
-
-  renderPreview() {
-    clearTimeout(this.previewTimer);
-    if (this.view === 'edit' || (!this.file && !this.readOnly)) {
-      this.previewEl.replaceChildren();
-      return;
-    }
-    const scroll = this.previewEl.scrollTop;
-    this.previewEl.replaceChildren(renderMarkdown(this.editor.content));
-    this.previewEl.scrollTop = scroll;
   }
 
   // --- saving ----------------------------------------------------------------
@@ -350,7 +308,6 @@ export class Pane {
     if (!this.dirty && !this.conflicted) {
       this.file.hash = disk.hash;
       this.editor.load(disk.content, { keepSelection: true });
-      this.renderPreview();
       this.flashState('Reloaded: changed on disk');
       this.onChange(this);
       return 'reloaded';
@@ -376,7 +333,6 @@ export class Pane {
     this.file.hash = diskHash;
     this.editor.load(diskContent, { keepSelection: true });
     this.hideBanner();
-    this.renderPreview();
     this.updateStatus();
     this.onChange(this);
   }
@@ -394,9 +350,9 @@ export class Pane {
   }
 }
 
-// --- markdown preview ----------------------------------------------------------
+// --- markdown rendering --------------------------------------------------------
 
-// Book files come from many hands (agents, imports), so the preview drops
+// Book files come from many hands (agents, imports), so rendering drops
 // anything that could run code: scripts, frames, event handlers, js: URLs.
 const BLOCKED_TAGS = 'script, style, iframe, frame, frameset, object, embed, link, meta, base, form, input, button, textarea, select';
 

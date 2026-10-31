@@ -15,7 +15,6 @@ export const SHORTCUTS = [
   { id: 'prevScene', mod: true, alt: true, key: 'ArrowUp', label: `${MOD}${ALT}↑`, help: 'Previous scene' },
   { id: 'nextScene', mod: true, alt: true, key: 'ArrowDown', label: `${MOD}${ALT}↓`, help: 'Next scene' },
   { id: 'companion', mod: true, alt: true, code: 'KeyP', label: `${MOD}${ALT}P`, help: 'Show or hide the plot (or scene) beside the file' },
-  { id: 'cycleView', mod: true, code: 'KeyE', label: `${MOD}E`, help: 'Edit → Split → Preview, in the pane you are in' },
   { id: 'history', mod: true, alt: true, code: 'KeyH', label: `${MOD}${ALT}H`, help: 'History' },
   { id: 'claude', mod: true, alt: true, code: 'KeyC', label: `${MOD}${ALT}C`, help: 'Show or hide the Claude panel' },
   { id: 'help', mod: true, code: 'Slash', label: `${MOD}/  or  ?`, help: 'This list' },
