@@ -731,6 +731,18 @@ svg.graph .lane-5.dot { fill: var(--lane-5); }
 .claude-files ul { list-style: none; margin: 0; padding: 0; }
 .claude-files-actions { display: flex; gap: 8px; padding: 6px 12px 0; flex-wrap: wrap; }
 .claude-files-actions button { font-size: 12px; }
+.claude-questions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.claude-questions button { font-size: 12px; }
+
+.dialog.answer-dialog { width: min(640px, calc(100vw - 32px)); }
+.answer-head { display: flex; align-items: baseline; gap: 10px; }
+.answer-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.answer-pill { min-width: 28px; padding: 2px 6px; font-size: 12px; }
+.answer-pill.answered { background: var(--accent-soft); }
+.answer-pill.current { border-color: var(--accent); font-weight: 600; }
+.answer-question { max-height: 40vh; overflow-y: scroll; padding: 8px 10px; border: 1px solid var(--divider); border-radius: 6px; background: var(--surface); }
+.answer-question > :first-child { margin-top: 0; }
+.answer-question > :last-child { margin-bottom: 0; }
 .claude-done { font-size: 11px; text-align: center; padding-bottom: 6px; border-bottom: 1px dashed var(--divider); }
 
 .claude-compose { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 10px; border-top: 1px solid var(--divider); }

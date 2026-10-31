@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { renderMarkdown } from './pane.js';
+import { ANSWERS_START, answersMessage, questionLabel, questionsIn } from './questions.js';
 import { h, showMenu, toast } from './ui.js';
 import { countWords } from './wordcount.js';
 
@@ -147,13 +148,15 @@ export class ClaudePanel {
   }
 
   //   images: the run looks at images (the server runs it on Haiku)
+  // Resolves true once the run has started.
   async send(text = this.input.value, { images = false } = {}) {
     const prompt = text.trim();
-    if (!prompt || this.runId) return;
+    if (!prompt || this.runId) return false;
     this.setRunning(true, 'Saving…');
     if (!(await this.beforeRun())) {
       this.setRunning(false);
-      return toast('Save failed, so Claude didn’t start. Fix the problem shown in the pane first.', { error: true });
+      toast('Save failed, so Claude didn’t start. Fix the problem shown in the pane first.', { error: true });
+      return false;
     }
     try {
       const { runId } = await api.claudeStart(this.bookId, { prompt, context: this.contextToSend(), images });
@@ -161,9 +164,11 @@ export class ClaudePanel {
       this.renderQuick();
       this.logEl.querySelector('.claude-welcome')?.remove();
       this.follow(runId);
+      return true;
     } catch (err) {
       this.setRunning(false);
       toast(err.message, { error: true });
+      return false;
     }
   }
 
@@ -223,6 +228,8 @@ export class ClaudePanel {
 
   resetRender() {
     this.textEl = null;
+    this.replyEl = null; // the run's last block of text
+    this.questionsBar = null; // the last reply's "Answer the questions" bar
     this.tools = new Map();
     this.cards = new Map();
   }
@@ -231,7 +238,12 @@ export class ClaudePanel {
     const atEnd = this.nearEnd();
     if (e.type !== 'text') this.textEl = null;
     switch (e.type) {
-      case 'start': this.renderStart(e); break;
+      case 'start':
+        this.replyEl = null;
+        if (e.prompt.startsWith(ANSWERS_START)) this.questionsBar?.markSent();
+        this.questionsBar = null;
+        this.renderStart(e);
+        break;
       case 'text': this.renderText(e.text, live); break;
       case 'tool': {
         const row = h('div', { class: 'claude-tool' }, h('span', { class: 'claude-tool-name' }, e.summary));
@@ -261,6 +273,7 @@ export class ClaudePanel {
         if (typeof e.cost === 'number') parts.push(`$${e.cost.toFixed(e.cost < 0.1 ? 3 : 2)}`);
         if (e.turns) parts.push(`${e.turns} turn${e.turns === 1 ? '' : 's'}`);
         this.logEl.append(h('div', { class: 'claude-done muted' }, parts.join(' · ')));
+        this.renderQuestions();
         break;
       }
       case 'error':
@@ -292,6 +305,7 @@ export class ClaudePanel {
       this.textEl = h('div', { class: 'claude-msg claude-assistant claude-md' });
       this.textEl.markdown = '';
       this.logEl.append(this.textEl);
+      this.replyEl = this.textEl;
     }
     const el = this.textEl;
     el.markdown += text;
@@ -305,6 +319,32 @@ export class ClaudePanel {
       draw();
       this.scrollToEnd(atEnd);
     });
+  }
+
+  // A finished reply that ends with questions gets a button to answer them
+  // one at a time. Drafts stay with the button until they're sent.
+  renderQuestions() {
+    const reply = this.replyEl;
+    const questions = reply ? questionsIn(reply.markdown) : [];
+    if (!questions.length) return;
+    const answers = questions.map(() => '');
+    const n = questions.length;
+    const bar = h('div', { class: 'claude-questions' });
+    const open = () => answerDialog(questions, answers, {
+      onSend: async (message) => {
+        if (this.runId) {
+          toast('Claude is still working; send your answers when it’s done', { error: true });
+          return false;
+        }
+        return this.send(message);
+      },
+    });
+    bar.markSent = () => bar.replaceChildren(h('span', { class: 'muted' }, 'Answers sent'),
+      h('button', { type: 'button', onclick: open }, 'Answer again…'));
+    bar.append(h('button', { type: 'button', class: 'primary', onclick: open },
+      `Answer ${n === 1 ? 'the question' : `the ${n} questions`}…`));
+    reply.after(bar);
+    this.questionsBar = bar;
   }
 
   renderCard(e, live) {
@@ -433,6 +473,79 @@ export class ClaudePanel {
       },
     }, p)));
   }
+}
+
+// Claude's questions, one at a time, each with a box for the answer. Answers
+// are written into `answers` as they're typed, so closing keeps them.
+//   onSend(message) → Promise of true once it's sent
+function answerDialog(questions, answers, { onSend }) {
+  let at = Math.max(0, answers.findIndex((a) => !a.trim()));
+  const counter = h('span', { class: 'muted' });
+  const questionEl = h('div', { class: 'claude-md answer-question' });
+  const answerEl = h('textarea', { rows: 5, spellcheck: 'true', 'aria-label': 'Your answer', placeholder: 'Your answer. Leave it empty to skip.' });
+  const navEl = h('div', { class: 'answer-nav', role: 'group', 'aria-label': 'Questions' });
+  const backBtn = h('button', { type: 'button', onclick: () => go(at - 1) }, 'Back');
+  const nextBtn = h('button', { type: 'button', class: 'primary', onclick: () => go(at + 1) }, 'Next');
+  const sendBtn = h('button', { type: 'button', onclick: () => send() }, 'Send answers');
+  const dialog = h('dialog', { class: 'dialog answer-dialog' },
+    h('form', { method: 'dialog' },
+      h('div', { class: 'answer-head' }, h('h2', {}, 'Claude’s questions'), counter),
+      navEl,
+      questionEl,
+      answerEl,
+      h('p', { class: 'field-hint' }, '⌘↩ for the next question. Skipped questions are left out of the reply.'),
+      h('div', { class: 'dialog-buttons' },
+        h('button', { type: 'submit', title: 'Your answers are kept until you send them' }, 'Close'),
+        h('span', { class: 'spacer' }),
+        backBtn, sendBtn, nextBtn)));
+
+  function show() {
+    const last = at === questions.length - 1;
+    counter.textContent = `${at + 1} of ${questions.length}`;
+    questionEl.replaceChildren(renderMarkdown(questions[at]));
+    answerEl.value = answers[at];
+    backBtn.disabled = at === 0;
+    nextBtn.hidden = last;
+    sendBtn.classList.toggle('primary', last);
+    navEl.replaceChildren(...questions.map((q, i) => h('button', {
+      type: 'button',
+      class: `answer-pill${i === at ? ' current' : ''}${answers[i].trim() ? ' answered' : ''}`,
+      title: questionLabel(q),
+      'aria-current': i === at ? 'step' : null,
+      onclick: () => go(i),
+    }, String(i + 1))));
+    answerEl.focus();
+  }
+  function go(i) {
+    if (i < 0 || i >= questions.length) return;
+    at = i;
+    show();
+  }
+  async function send() {
+    const message = answersMessage(questions, answers);
+    if (!message) {
+      toast('Answer at least one question first', { error: true });
+      return;
+    }
+    sendBtn.disabled = true;
+    if (await onSend(message)) dialog.close();
+    else sendBtn.disabled = false;
+  }
+
+  answerEl.addEventListener('input', () => {
+    answers[at] = answerEl.value;
+    navEl.children[at]?.classList.toggle('answered', Boolean(answerEl.value.trim()));
+  });
+  answerEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    if (at === questions.length - 1) send();
+    else go(at + 1);
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  show();
 }
 
 function firstLine(s) {
