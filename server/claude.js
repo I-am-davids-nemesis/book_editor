@@ -13,9 +13,19 @@ import { resolveInBook } from './paths.js';
 // files it changed and the final result. Before a run the book is
 // checkpointed; after it, the run's changes are committed as "Claude: …".
 
+// Writing runs use a pinned model, so a run doesn't change when Claude Code's
+// default does. An exact ID lasts until that model is retired.
+export const DEFAULT_MODEL = 'claude-opus-5-5';
 // Runs that look at images use a small model: it's enough to say what a
 // picture shows, and much cheaper.
 export const DEFAULT_IMAGE_MODEL = 'claude-haiku-5-5';
+
+// The models a config asks for: claude.model and claude.imageModel, each
+// falling back to its default when missing or blank.
+export function modelsFrom(config) {
+  const pick = (v, fallback) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
+  return { model: pick(config?.claude?.model, DEFAULT_MODEL), imageModel: pick(config?.claude?.imageModel, DEFAULT_IMAGE_MODEL) };
+}
 
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -29,7 +39,7 @@ const MAX_SELECTION = 20000;
 const MAX_ENTRIES = 2000;
 
 const SYSTEM_APPEND = `You are helping a writer with a novel, from a panel inside their book editor.
-The book is plain Markdown in git: manuscript/ holds scenes (pure prose, no front matter), outline/ mirrors it with one plot file per scene, codex/ holds characters, locations and notes. AGENTS.md has the book's conventions.
+The book is plain Markdown in git: manuscript/ holds scenes (pure prose, no front matter), outline/ mirrors it with one plot file per scene, codex/ holds characters, locations and notes (an entry may start with front matter whose aliases: list gives its other names; keep it when you edit). AGENTS.md has the book's conventions.
 Files you change reload in the writer's open panes, and the editor commits your changes when you finish. Change only files inside this book. Keep answers in the panel short; the work belongs in the files.`;
 
 // Runs use your Claude Code login. An ANTHROPIC_API_KEY in the shell that
@@ -62,7 +72,7 @@ export class ClaudeService {
   // rather than into files: no session, no checkpoint, no approvals. Claude
   // may read and search inside the book and do nothing else. Resolves with
   // its final answer.
-  async ask(root, prompt, { signal } = {}) {
+  async ask(root, prompt, { signal, model = DEFAULT_MODEL } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw badRequest('Missing prompt');
     if (prompt.length > MAX_PROMPT) throw badRequest(`The prompt is too long (at most ${MAX_PROMPT} characters)`);
     const policy = new Policy(root, 'off');
@@ -84,6 +94,7 @@ export class ClaudeService {
           settingSources: ['project'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: SYSTEM_APPEND },
           tools: [...READ_TOOLS],
+          model,
           permissionMode: 'default',
           canUseTool: readOnly,
           // Settings can't widen this: anything but an in-book read is refused.
@@ -180,9 +191,10 @@ export class ClaudeService {
   }
 
   // Starts a run and returns at once; its work streams as events.
+  //   model: the model for ordinary runs (the config's claude.model)
   //   images: the run looks at images, so it uses the image model (Haiku
   //   unless the config's claude.imageModel says otherwise)
-  async start(root, { prompt, context, newSession = false, images = false, imageModel = DEFAULT_IMAGE_MODEL } = {}) {
+  async start(root, { prompt, context, newSession = false, images = false, model = DEFAULT_MODEL, imageModel = DEFAULT_IMAGE_MODEL } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw badRequest('Write a prompt first');
     if (prompt.length > MAX_PROMPT) throw badRequest('That prompt is too long');
     if (this.active.has(root)) throw conflict('Claude is already working on this book');
@@ -190,7 +202,7 @@ export class ClaudeService {
     for (const [id, old] of this.runs) if (old.root === root) this.runs.delete(id);
     this.runs.set(run.id, run);
     this.active.set(root, run);
-    run.model = images === true ? imageModel : null;
+    run.model = images === true ? imageModel : model;
     run.done = this.execute(run, { newSession: newSession === true })
       .catch((err) => this.log.error(`Claude run failed in ${root}: ${err.message}`))
       .finally(() => { if (this.active.get(root) === run) this.active.delete(root); });
@@ -208,7 +220,7 @@ export class ClaudeService {
     const { root } = run;
     const store = await this.load(root);
     if (newSession) Object.assign(store, { sessionId: null, entries: [] });
-    run.emit({ type: 'start', prompt: run.prompt, context: run.context, at: new Date().toISOString(), ...(run.model ? { model: run.model } : {}) });
+    run.emit({ type: 'start', prompt: run.prompt, context: run.context, at: new Date().toISOString(), model: run.model });
 
     let before = null;
     const repo = await isRepo(root);
@@ -235,7 +247,7 @@ export class ClaudeService {
           settingSources: ['project'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: SYSTEM_APPEND },
           tools: [...READ_TOOLS, 'Edit', 'Write', ...(store.extraTools === 'ask' ? EXTRA_TOOLS : [])],
-          ...(run.model ? { model: run.model } : {}),
+          model: run.model,
           permissionMode: 'default',
           canUseTool: (tool, input, opts) => this.canUseTool(run, policy, tool, input, opts),
           // A hook runs even where a settings rule would allow the tool, so the

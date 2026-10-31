@@ -243,13 +243,39 @@ export function assembleShot({ shot, entries, styleText = '', refs = [] }) {
   return parts.join('\n\n');
 }
 
-// Codex entries whose title (or its first word, for "Tor Halloran") appears as
-// a word in `text`, matching case, since names are capitalized: [path], in
-// entry order.
+// The other names an entry goes by, from its front matter:
+//   aliases: [Torrance, Master Baker]
+// or a list, one "- name" per line. Quotes around a name are dropped.
+export function entryAliases(markdown) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(String(markdown ?? ''));
+  if (!m) return [];
+  const lines = m[1].split(/\r?\n/);
+  const at = lines.findIndex((l) => /^aliases\s*:/.test(l));
+  if (at < 0) return [];
+  const inline = lines[at].replace(/^aliases\s*:/, '').trim();
+  let names;
+  if (inline) {
+    names = inline.replace(/^\[|\]$/g, '').split(',');
+  } else {
+    names = [];
+    for (const l of lines.slice(at + 1)) {
+      const item = /^\s*-\s*(.*)$/.exec(l);
+      if (!item) break;
+      names.push(item[1]);
+    }
+  }
+  return [...new Set(names.map((n) => n.trim().replace(/^(["'])(.*)\1$/, '$2').trim()).filter(Boolean))];
+}
+
+// Codex entries whose title (or its first word, for "Tor Halloran") or one of
+// its `aliases` appears as a word in `text`, matching case, since names are
+// capitalized: [path], in entry order.
 export function mentionedEntries(text, entries) {
   const words = String(text);
   const has = (name) => name.length > 1 && new RegExp(`(^|[^\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(words);
-  return entries.filter((e) => has(e.title) || (e.title.includes(' ') && has(e.title.split(' ')[0]) && e.kind === 'character')).map((e) => e.path);
+  return entries.filter((e) => has(e.title)
+    || (e.title.includes(' ') && has(e.title.split(' ')[0]) && e.kind === 'character')
+    || (e.aliases ?? []).some(has)).map((e) => e.path);
 }
 
 const listOf = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '');

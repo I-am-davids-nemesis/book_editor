@@ -6,7 +6,7 @@ import { addVisualStyle } from '../server/codex.js';
 import { prepareHandoff } from '../server/handoff.js';
 import { briefPrompt } from '../public/js/codexprompts.js';
 import {
-  assembleShot, entryLook, fixedTraits, handoffPrompt, lookOf, mentionedEntries, missingViews, pickReferences, rankImages,
+  assembleShot, entryAliases, entryLook, fixedTraits, handoffPrompt, lookOf, mentionedEntries, missingViews, pickReferences, rankImages,
   shotImages, variantsIn, visualStyle, VISUAL_STYLE,
 } from '../public/js/worldmodel.js';
 import { listFiles, tempDir, writeFiles } from './helpers.js';
@@ -248,6 +248,16 @@ test('names in a passage suggest entries, matching case', () => {
   const list = [...entries].map(([path, e]) => ({ path, ...e }));
   assert.deepEqual(mentionedEntries('At the Washing House, Tor looked up. dorgal was late.', list), ['codex/characters/tor.md', 'codex/locations/washing-house.md']);
   assert.deepEqual(mentionedEntries('Tormund came.', list), []);
+  const withAliases = list.map((e) => (e.path === 'codex/characters/tor.md' ? { ...e, aliases: ['the Builder'] } : e));
+  assert.deepEqual(mentionedEntries('Everyone watched the Builder work.', withAliases), ['codex/characters/tor.md']);
+});
+
+test('aliases come from the entry’s front matter, inline or as a list', () => {
+  assert.deepEqual(entryAliases('---\naliases: [Torrance, "Master Baker", Torrance]\n---\n# Tor\n'), ['Torrance', 'Master Baker']);
+  assert.deepEqual(entryAliases('---\nkind: character\naliases:\n  - Torrance\n  - \'the boy\'\nother: x\n---\n# Tor\n'), ['Torrance', 'the boy']);
+  assert.deepEqual(entryAliases('---\naliases: Torrance\n---\n'), ['Torrance']);
+  assert.deepEqual(entryAliases('# Tor\n\naliases: [no]\n'), [], 'only front matter counts');
+  assert.deepEqual(entryAliases('---\ntitle: x\n---\n'), []);
 });
 
 test('the brief prompt names the moment, the cast and the rules', () => {

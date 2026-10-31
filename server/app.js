@@ -8,7 +8,7 @@ import {
   createBook, forgetBook, getBook, getBookRoot, libraryExists, listBooks, registerBook,
 } from './books.js';
 import { CANDIDATES, discardCandidates, keepCandidate } from './candidates.js';
-import { ClaudeService } from './claude.js';
+import { ClaudeService, modelsFrom } from './claude.js';
 import { addCodexEntry, addVisualStyle, deleteCodexEntry, renameCodexEntry } from './codex.js';
 import { compile, DEFAULT_SEPARATOR, readSettings } from './compile.js';
 import { configPath, loadConfig } from './config.js';
@@ -413,7 +413,7 @@ export function createApp({
   claudeRoutes.post('/ask', async (req, res) => {
     const abort = new AbortController();
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
-    res.json({ text: await claude.ask(await bookRoot(req), req.body?.prompt, { signal: abort.signal }) });
+    res.json({ text: await claude.ask(await bookRoot(req), req.body?.prompt, { signal: abort.signal, model: modelsFrom(req.config).model }) });
   });
 
   claudeRoutes.delete('/session', async (req, res) => {
@@ -426,8 +426,7 @@ export function createApp({
 
   claudeRoutes.post('/runs', async (req, res) => {
     const { prompt, context, newSession, images } = req.body || {};
-    const imageModel = typeof req.config.claude?.imageModel === 'string' && req.config.claude.imageModel ? req.config.claude.imageModel : undefined;
-    res.status(201).json(await claude.start(await bookRoot(req), { prompt, context, newSession, images: images === true, imageModel }));
+    res.status(201).json(await claude.start(await bookRoot(req), { prompt, context, newSession, images: images === true, ...modelsFrom(req.config) }));
   });
 
   // The run's events from the start (or after Last-Event-ID), then live.

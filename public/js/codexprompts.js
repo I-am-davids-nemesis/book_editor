@@ -50,7 +50,7 @@ const KIND_FOCUS = {
 export function gatherPrompt(entry) {
   return `Gather a description of “${entry.title}” (${entry.path}) from the manuscript.
 
-1. Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note}. Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context, and ${VISUAL_STYLE} if the book has one: keep what you describe within its period and setting, and away from what it says to avoid.
+1. Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note}. Search for its other names too: the \`aliases:\` list in the entry's front matter, if it has one. Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context, and ${VISUAL_STYLE} if the book has one: keep what you describe within its period and setting, and away from what it says to avoid.
 2. In ${entry.path}, write a "## ${DESCRIPTION}" section in exactly this shape, replacing the section if it already exists (up to the next "## " heading). Put it after the entry's opening lines if it's new. Leave every other part of the file alone.
 
 ${SECTION_FORMAT}

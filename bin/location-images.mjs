@@ -28,7 +28,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { listCandidates } from '../server/candidates.js';
-import { ClaudeService } from '../server/claude.js';
+import { ClaudeService, modelsFrom } from '../server/claude.js';
 import { configPath, loadConfig } from '../server/config.js';
 import { providersFrom } from '../server/imagegen/index.js';
 import { ImageJobs, MAX_IMAGES, SIZES } from '../server/imagegen/jobs.js';
@@ -76,8 +76,8 @@ async function locations(root) {
 
 // One Gather run, headless: Claude reads the manuscript and writes the
 // Description. Anything that would need the writer's approval is refused.
-async function gather(claude, root, rel, title) {
-  const { runId } = await claude.start(root, { prompt: gatherPrompt({ path: rel, title, kind: 'location' }), newSession: true });
+async function gather(claude, root, rel, title, model) {
+  const { runId } = await claude.start(root, { prompt: gatherPrompt({ path: rel, title, kind: 'location' }), newSession: true, model });
   const run = claude.run(runId, root);
   let text = '';
   const errors = [];
@@ -127,7 +127,8 @@ async function main() {
     paths = paths.filter((p) => opts.only.includes(path.basename(p, '.md')));
   }
 
-  const provider = providersFrom(await loadConfig()).find((p) => p.id === 'comfyui');
+  const config = await loadConfig();
+  const provider = providersFrom(config).find((p) => p.id === 'comfyui');
   if (!opts.dryRun) {
     const check = await provider.check();
     const model = check.models.find((m) => m.id === opts.model);
@@ -166,7 +167,7 @@ async function main() {
       }
       console.log('  gathering a description from the manuscript (Claude)…');
       try {
-        const said = await gather(claude, root, rel, title);
+        const said = await gather(claude, root, rel, title, modelsFrom(config).model);
         if (said) console.log(said.split('\n').map((l) => `    ${l}`).join('\n'));
       } catch (err) {
         console.log(`  gathering failed: ${err.message}`);

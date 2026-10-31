@@ -60,6 +60,14 @@ Set `BOOK_EDITOR_CONFIG=/path/to/config.json` to use a different config file.
 - Each row's ⋯ menu has Rename, Move up or down, Delete and History. You can also drag rows to reorder.
 - File numbers are kept in order, and every change to `manuscript/` is mirrored in `outline/`.
 - The Codex tab has **+ Character**, **+ Location** and **+ Note**. New entries start from the templates in `codex/_templates/`, which you can edit.
+- **Other names.** A codex entry can list the other names it goes by in front matter at the top of the file. Gather searches the manuscript for them, and Stage suggests the entry when its moment uses one:
+
+  ```markdown
+  ---
+  aliases: [Torrance, Master Baker]
+  ---
+  # Tor Baker
+  ```
 
 ### Narration modes
 
@@ -235,6 +243,7 @@ Images are committed to git like everything else, so large ones make the reposit
 - **Limits.** Claude can read and search the book, and create or edit files inside it, never outside it or in `.git`. Bash and web tools are off. The ⋯ menu can switch them to "ask each time", which shows an **Allow / Deny** card for each request.
 - **Conversation.** Follow-up prompts continue the same conversation, even after a reload or a restart. **New conversation** starts fresh. Session ids and transcripts are kept in `~/.config/book-editor/claude/`, not in the book.
 - **Stop** ends a run. Anything it changed by then is still committed.
+- **Model.** Runs use Claude Opus 5.5 (`claude-opus-5-5`), pinned so a run doesn't change when Claude Code's default does. Set `"claude": { "model": "…" }` in the config to use another; give an exact model ID. Runs that look at images use `claude.imageModel` instead (see Lookbook).
 
 ## Keyboard shortcuts
 

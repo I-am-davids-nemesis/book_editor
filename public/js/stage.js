@@ -5,7 +5,7 @@ import { handoffButtons, loadVisualStyle, referenceItems } from './handoff.js';
 import { codexEntries } from './tree.js';
 import { h, toast } from './ui.js';
 import {
-  assembleShot, entryLook, fixedTraits, lookOf, mentionedEntries, pickReferences, SHOT_SIZES, shotImages, variantsIn, VIEW_LABELS,
+  assembleShot, entryAliases, entryLook, fixedTraits, lookOf, mentionedEntries, pickReferences, SHOT_SIZES, shotImages, variantsIn, VIEW_LABELS,
 } from './worldmodel.js';
 
 // A moment this long reads as a scene, not a picture: suggest a brief.
@@ -53,6 +53,12 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry, onCan
     }
     update();
   };
+  // Every person's and place's aliases, so the moment's "Mentioned" chips
+  // catch other names. Read once, in the background.
+  const aliases = new Map();
+  Promise.all([...characters, ...locations].map(async (e) => {
+    try { aliases.set(e.path, entryAliases(await readEntry(e.path))); } catch { /* the title still matches */ }
+  })).then(() => update());
   const entries = () => new Map([...byPath].map(([p, e]) => [p, { ...e, text: texts.get(p) ?? '' }]));
 
   // --- left: what's in the shot ---
@@ -173,7 +179,7 @@ export async function stageDialog({ bookId, tree, initial = {}, readEntry, onCan
     ].filter(Boolean).join(' ');
 
     // Characters and places the moment names that aren't in the shot yet.
-    const named = mentionedEntries(`${shot.moment.text}\n${shot.brief}`, [...characters, ...locations])
+    const named = mentionedEntries(`${shot.moment.text}\n${shot.brief}`, [...characters, ...locations].map((e) => ({ ...e, aliases: aliases.get(e.path) })))
       .filter((p) => !shot.characters.some((c) => c.path === p) && p !== shot.location);
     mentionedEl.replaceChildren(...(named.length ? [
       h('span', { class: 'muted' }, 'Mentioned:'),

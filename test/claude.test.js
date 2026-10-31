@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { createApp } from '../server/app.js';
-import { agentEnv, buildPrompt, ClaudeService, compact } from '../server/claude.js';
+import { agentEnv, buildPrompt, ClaudeService, compact, modelsFrom } from '../server/claude.js';
 import { saveConfig } from '../server/config.js';
 import { gitBook, gitIn, SAMPLE_BOOK, tempDir } from './helpers.js';
 
@@ -49,6 +49,7 @@ test('ask answers a one-off question, reading only inside the book', async () =>
   assert.deepEqual(decisions, [['Read', 'allow'], ['Read', 'deny'], ['Edit', 'deny'], ['Bash', 'deny'], ['Write hook', 'deny']]);
   const { options } = calls[0];
   assert.deepEqual(options.tools, ['Read', 'Glob', 'Grep']);
+  assert.equal(options.model, 'claude-opus-5-5', 'asks use the pinned model');
   assert.equal(options.resume, undefined);
   // No session or checkpoint: the book's store isn't touched.
   assert.deepEqual((await claude.session(root)).sessionId ?? null, null);
@@ -152,18 +153,23 @@ test('follow-ups resume the session; a new conversation does not', async () => {
   assert.deepEqual(await claude.session(root), { sessionId: null, entries: [], extraTools: 'off', running: null });
 });
 
-test('runs that look at images use the image model; others the default', async () => {
+test('runs that look at images use the image model; others the pinned model', async () => {
   const root = await gitBook(SAMPLE_BOOK);
   const { claude, calls } = await service(async function* () {
     yield result;
   });
-  for (const opts of [{}, { images: true }, { images: true, imageModel: 'claude-other' }]) {
+  for (const opts of [{}, { model: 'claude-writer' }, { images: true }, { images: true, imageModel: 'claude-other' }]) {
     const { runId } = await claude.start(root, { prompt: 'Look', ...opts });
     await collect(claude.run(runId, root));
   }
-  assert.deepEqual(calls.map((c) => c.options.model), [undefined, 'claude-haiku-5-5', 'claude-other']);
+  assert.deepEqual(calls.map((c) => c.options.model), ['claude-opus-5-5', 'claude-writer', 'claude-haiku-5-5', 'claude-other']);
   const starts = (await claude.session(root)).entries.filter((e) => e.type === 'start');
   assert.equal(starts.at(-1).model, 'claude-other', 'the panel can show which model ran');
+});
+
+test('modelsFrom reads claude.model and claude.imageModel, with defaults', () => {
+  assert.deepEqual(modelsFrom({}), { model: 'claude-opus-5-5', imageModel: 'claude-haiku-5-5' });
+  assert.deepEqual(modelsFrom({ claude: { model: ' claude-x ', imageModel: '' } }), { model: 'claude-x', imageModel: 'claude-haiku-5-5' });
 });
 
 test('approval requests round-trip through the panel', async () => {
