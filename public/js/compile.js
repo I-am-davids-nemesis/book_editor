@@ -21,6 +21,11 @@ export function openCompileDialog({ bookId, bookTitle, chapters, modes, mode = '
     let saved = '';
 
     sep.addEventListener('input', () => { remember.checked = sep.value.trim() !== saved; });
+    // Once compiled, the Compile button hides until a setting changes, when
+    // it comes back as Compile again.
+    for (const el of [scope, modeSel, sep]) {
+      el.addEventListener('input', () => { if (!result.hidden) go.hidden = false; });
+    }
 
     const form = h('form', { method: 'dialog', class: 'compile-panel' },
       h('h2', {}, 'Compile'),
@@ -58,11 +63,12 @@ export function openCompileDialog({ bookId, bookTitle, chapters, modes, mode = '
           remember.checked = false;
         }
         showResult(res);
+        go.hidden = true;
       } catch (err) {
         error.textContent = err.message;
       } finally {
         go.disabled = false;
-        go.textContent = 'Compile';
+        go.textContent = result.hidden ? 'Compile' : 'Compile again';
       }
     });
 
@@ -85,12 +91,14 @@ export function openCompileDialog({ bookId, bookTitle, chapters, modes, mode = '
           }
         },
       }, 'Copy');
-      result.replaceChildren(
+      // replaceChildren, unlike h(), writes a null child as the text "null".
+      result.replaceChildren(...[
         h('p', { class: 'compile-summary' },
           h('strong', {}, res.path), ` · ${formatCount(res.words)} words · ${res.chapters} chapter${res.chapters === 1 ? '' : 's'}, ${res.scenes} scene${res.scenes === 1 ? '' : 's'}`),
         res.warnings.length ? h('ul', { class: 'compile-warnings' }, res.warnings.map((w) => h('li', {}, w))) : null,
         h('div', { class: 'compile-actions' }, download, copy),
-        h('div', { class: 'compile-preview' }, renderMarkdown(res.content)));
+        h('div', { class: 'compile-preview' }, renderMarkdown(res.content)),
+      ].filter(Boolean));
       result.hidden = false;
     }
 
