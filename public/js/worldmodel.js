@@ -2,10 +2,10 @@
 // entry's fixed traits and variants, and the lookbook images marked as its
 // references. Shared by the browser and the server.
 
-import { DESCRIPTION, FIXED_TRAITS, imagePromptFrom } from './codexprompts.js';
+import { DESCRIPTION, FIXED_TRAITS, imagePromptFrom, VISUAL_STYLE } from './codexprompts.js';
 import { bullets, prose, sectionBody, stripLabels } from './sections.js';
 
-export const VISUAL_STYLE = 'codex/visual-style.md';
+export { VISUAL_STYLE };
 
 // The views a reference image can be, by entry kind. A model sheet wants the
 // first ones; the order is also the order references are sent in.

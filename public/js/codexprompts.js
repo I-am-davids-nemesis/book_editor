@@ -8,6 +8,7 @@ import { prose, sectionBody } from './sections.js';
 export const DESCRIPTION = 'Description';
 export const IMAGE_PROMPT = 'Image prompt';
 export const FIXED_TRAITS = 'Fixed traits';
+export const VISUAL_STYLE = 'codex/visual-style.md';
 
 // Online image generators: the editor copies the prompt and opens one.
 export const IMAGE_TOOLS = [
@@ -29,7 +30,7 @@ const SECTION_FORMAT = `## ${DESCRIPTION}
 
 ### ${IMAGE_PROMPT}
 
-<One self-contained paragraph for an image generator: the subject, its appearance, clothing or materials, setting, light and mood, plus a style note if the book's codex has one. Visual detail only. No character names, no plot, no references to the book.>
+<One self-contained paragraph for an image generator: the subject, its appearance, clothing or materials, setting, light and mood. Visual detail only. No character names, no plot, no references to the book. No medium or rendering style (photograph, painterly, illustration, film stock, palette): the editor adds ${VISUAL_STYLE} to every prompt it prepares, so a style here would repeat it or fight it.>
 
 ### From the manuscript
 
@@ -49,7 +50,7 @@ const KIND_FOCUS = {
 export function gatherPrompt(entry) {
   return `Gather a description of “${entry.title}” (${entry.path}) from the manuscript.
 
-1. Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note}. Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context.
+1. Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note}. Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context, and ${VISUAL_STYLE} if the book has one: keep what you describe within its period and setting, and away from what it says to avoid.
 2. In ${entry.path}, write a "## ${DESCRIPTION}" section in exactly this shape, replacing the section if it already exists (up to the next "## " heading). Put it after the entry's opening lines if it's new. Leave every other part of the file alone.
 
 ${SECTION_FORMAT}
@@ -100,7 +101,7 @@ For each entry:
 ${SECTION_FORMAT}
 
 2. Add the concrete details the image settles that the text leaves open (colors, materials, proportions, wear, light, expression) to the description prose. Keep the writer's facts: where the image contradicts the text, the manuscript or the entry's "## ${FIXED_TRAITS}", don't change the text. Add the conflict to "### Open questions" instead, naming the image. Never edit "## ${FIXED_TRAITS}".
-3. Update "### ${IMAGE_PROMPT}" so it would produce this look again, and "### Look" if the entry has one.
+3. Update "### ${IMAGE_PROMPT}" so it would produce this look again, and "### Look" if the entry has one. Describe the subject, not the image's medium or style: the editor adds ${VISUAL_STYLE} itself.
 4. Add the image to the section as a source: "- Image: lookbook/<file>".
 
 Don't change anything in manuscript/ or outline/. In the panel, list what you added and the conflicts you found, briefly.`;

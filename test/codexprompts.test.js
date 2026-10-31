@@ -72,3 +72,11 @@ test('gather leaves the look and image prompt empty when nothing visual is known
   assert.match(p, /establish nothing visual about Gallaia/);
   assert.equal(imagePromptFrom('# G\n\n## Description\n\nNothing yet.\n\n### Look\n\n### Image prompt\n\n### From the manuscript\n'), null);
 });
+
+test('image prompts leave the style to the visual style note', () => {
+  const gather = gatherPrompt(tor);
+  assert.match(gather, /read codex\/characters\/tor\.md and the outline files for context, and codex\/visual-style\.md if the book has one/);
+  assert.match(gather, /No medium or rendering style/);
+  assert.doesNotMatch(gather, /style note if the book's codex has one/);
+  assert.match(refinePrompt([tor], [{ path: 'lookbook/tor.png', title: 'Tor' }]), /not the image's medium or style: the editor adds codex\/visual-style\.md itself/);
+});
