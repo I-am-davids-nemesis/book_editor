@@ -260,3 +260,9 @@ test('the brief prompt names the moment, the cast and the rules', () => {
   assert.match(prompt, /Framing asked for: wide shot; time: dawn\./);
   assert.match(prompt, /Don't describe how people or places look/);
 });
+
+test('codex source labels stay out of prompts', () => {
+  const entry = '# Davie\n\n## Description\n\nHis hair is brown. (canon, from the user) He is tall (assumed), and broad.\n\n## Fixed traits\n\n- Black hair. (canon, from the user)\n- (invented)\n';
+  assert.equal(entryLook(entry), 'His hair is brown. He is tall, and broad.');
+  assert.deepEqual(fixedTraits(entry), ['Black hair.']);
+});

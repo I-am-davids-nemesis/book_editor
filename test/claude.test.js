@@ -152,6 +152,20 @@ test('follow-ups resume the session; a new conversation does not', async () => {
   assert.deepEqual(await claude.session(root), { sessionId: null, entries: [], extraTools: 'off', running: null });
 });
 
+test('runs that look at images use the image model; others the default', async () => {
+  const root = await gitBook(SAMPLE_BOOK);
+  const { claude, calls } = await service(async function* () {
+    yield result;
+  });
+  for (const opts of [{}, { images: true }, { images: true, imageModel: 'claude-other' }]) {
+    const { runId } = await claude.start(root, { prompt: 'Look', ...opts });
+    await collect(claude.run(runId, root));
+  }
+  assert.deepEqual(calls.map((c) => c.options.model), [undefined, 'claude-haiku-5-5', 'claude-other']);
+  const starts = (await claude.session(root)).entries.filter((e) => e.type === 'start');
+  assert.equal(starts.at(-1).model, 'claude-other', 'the panel can show which model ran');
+});
+
 test('approval requests round-trip through the panel', async () => {
   const root = await gitBook(SAMPLE_BOOK);
   const answers = [];

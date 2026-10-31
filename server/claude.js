@@ -13,6 +13,10 @@ import { resolveInBook } from './paths.js';
 // files it changed and the final result. Before a run the book is
 // checkpointed; after it, the run's changes are committed as "Claude: …".
 
+// Runs that look at images use a small model: it's enough to say what a
+// picture shows, and much cheaper.
+export const DEFAULT_IMAGE_MODEL = 'claude-haiku-5-5';
+
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const EXTRA_TOOLS = new Set(['Bash', 'WebFetch', 'WebSearch']);
@@ -176,7 +180,9 @@ export class ClaudeService {
   }
 
   // Starts a run and returns at once; its work streams as events.
-  async start(root, { prompt, context, newSession = false } = {}) {
+  //   images: the run looks at images, so it uses the image model (Haiku
+  //   unless the config's claude.imageModel says otherwise)
+  async start(root, { prompt, context, newSession = false, images = false, imageModel = DEFAULT_IMAGE_MODEL } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw badRequest('Write a prompt first');
     if (prompt.length > MAX_PROMPT) throw badRequest('That prompt is too long');
     if (this.active.has(root)) throw conflict('Claude is already working on this book');
@@ -184,6 +190,7 @@ export class ClaudeService {
     for (const [id, old] of this.runs) if (old.root === root) this.runs.delete(id);
     this.runs.set(run.id, run);
     this.active.set(root, run);
+    run.model = images === true ? imageModel : null;
     run.done = this.execute(run, { newSession: newSession === true })
       .catch((err) => this.log.error(`Claude run failed in ${root}: ${err.message}`))
       .finally(() => { if (this.active.get(root) === run) this.active.delete(root); });
@@ -201,7 +208,7 @@ export class ClaudeService {
     const { root } = run;
     const store = await this.load(root);
     if (newSession) Object.assign(store, { sessionId: null, entries: [] });
-    run.emit({ type: 'start', prompt: run.prompt, context: run.context, at: new Date().toISOString() });
+    run.emit({ type: 'start', prompt: run.prompt, context: run.context, at: new Date().toISOString(), ...(run.model ? { model: run.model } : {}) });
 
     let before = null;
     const repo = await isRepo(root);
@@ -228,6 +235,7 @@ export class ClaudeService {
           settingSources: ['project'],
           systemPrompt: { type: 'preset', preset: 'claude_code', append: SYSTEM_APPEND },
           tools: [...READ_TOOLS, 'Edit', 'Write', ...(store.extraTools === 'ask' ? EXTRA_TOOLS : [])],
+          ...(run.model ? { model: run.model } : {}),
           permissionMode: 'default',
           canUseTool: (tool, input, opts) => this.canUseTool(run, policy, tool, input, opts),
           // A hook runs even where a settings rule would allow the tool, so the

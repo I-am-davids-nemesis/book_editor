@@ -54,6 +54,7 @@ export function gatherPrompt(entry) {
 
 ${SECTION_FORMAT}
 
+   If the sources establish nothing visual about ${entry.title}, say so in the prose and leave "### Look" and "### ${IMAGE_PROMPT}" empty (just the headings): a placeholder sentence there would be used as a prompt.
 3. Don't touch a "## ${FIXED_TRAITS}" section. If the entry has none, or it has no bullets, add a line to Open questions for each visual fact that should never change between pictures: "- Proposed fixed trait: <trait>".
 
 Don't change anything in manuscript/ or outline/. In the panel, just say how many passages you used and list the open questions.`;

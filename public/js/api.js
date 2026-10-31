@@ -61,7 +61,7 @@ export const api = {
   claudeClear: (id) => request('DELETE', `${book(id)}/claude/session`),
   claudeAsk: (id, prompt) => request('POST', `${book(id)}/claude/ask`, { prompt }),
   claudeSettings: (id, settings) => request('PUT', `${book(id)}/claude/settings`, settings),
-  claudeStart: (id, { prompt, context, newSession }) => request('POST', `${book(id)}/claude/runs`, { prompt, context, newSession }),
+  claudeStart: (id, { prompt, context, newSession, images }) => request('POST', `${book(id)}/claude/runs`, { prompt, context, newSession, images }),
   claudeAnswer: (id, run, requestId, allow) =>
     request('POST', `${book(id)}/claude/runs/${encodeURIComponent(run)}/permission`, { requestId, allow }),
   claudeStop: (id, run) => request('POST', `${book(id)}/claude/runs/${encodeURIComponent(run)}/stop`),

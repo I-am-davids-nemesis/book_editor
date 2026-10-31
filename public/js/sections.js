@@ -29,3 +29,12 @@ export function bullets(text) {
 export function prose(text) {
   return stripComments(text).split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n\n');
 }
+
+// Source labels a codex may put after a fact, "(canon, chapter one)",
+// "(assumed)", "(invented; accepted by the user)": for the writer, not for an
+// image prompt.
+export function stripLabels(text) {
+  return String(text)
+    .replace(/\s*\((?:canon|assumed|invented)\b[^()]*\)/gi, '')
+    .replace(/[ \t]+([.,;:])/g, '$1');
+}

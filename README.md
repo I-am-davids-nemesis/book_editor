@@ -148,7 +148,17 @@ FLUX.2 [klein] takes up to 4 reference images, so Stage lowers **Up to** to 4 wh
 
 Candidates live in `lookbook/.candidates/`, which the editor adds to the repository's `.git/info/exclude`, so they're never committed and the book's own files don't change. Ones older than 30 days are deleted. A kept picture's note ends with a **How it was made** section (the model, seed, prompt, the references and the commit each was at, and the shot), and its Lookbook panel has **Stage again**. Jobs run one at a time; a page reload picks up a running job, but restarting the server forgets it (its finished pictures stay).
 
-The **Claude ▾** actions are ordinary Claude runs: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF.
+**Every place at once.** `bin/location-images.mjs` pictures each of a book's codex locations with the same pieces Stage uses (the entry's image prompt and fixed traits, its reference images, the visual style), asking for the place empty, as an establishing view:
+
+```sh
+node ~/workspace/local_editor/bin/location-images.mjs ~/workspace/books/the_builder --gather
+```
+
+- `--gather` first writes a Description for each location that has none, with the editor's **Gather** run by Claude. Each run reads the manuscript, edits only that entry, and is committed as `Claude: …`. These runs keep their own conversation, so your Claude panel's isn't touched.
+- Places the manuscript never shows (their Description quotes nothing from `manuscript/`) are reported and skipped.
+- `--n 2` (the default) is how many pictures of the place alone each location should have. Kept and waiting pictures both count; ones with characters in them don't. `--force` makes more anyway; `--only a,b` limits it to some locations; `--dry-run` prints the prompts.
+
+The **Claude ▾** actions are ordinary Claude runs: the panel opens and shows what Claude does, the changes are committed as one `Claude: …` commit, and **Undo run** puts everything back. Claude can look at PNG, JPEG, GIF and WebP images, but not AVIF. Runs that look at images (**Refine … from this image**) use Claude Haiku, which is plenty to say what a picture shows and much cheaper; set `"claude": { "imageModel": "…" }` in the config to use another model. The panel shows the model under the prompt.
 
 On disk, images live in `lookbook/`. Each linked or captioned image has a note beside it with the same name (`lookbook/tor-at-the-well.md`), which lists the entries it shows under `of:` and holds the caption. The note also embeds the image, so it reads well in Obsidian:
 

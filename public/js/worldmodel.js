@@ -3,7 +3,7 @@
 // references. Shared by the browser and the server.
 
 import { DESCRIPTION, FIXED_TRAITS, imagePromptFrom } from './codexprompts.js';
-import { bullets, prose, sectionBody } from './sections.js';
+import { bullets, prose, sectionBody, stripLabels } from './sections.js';
 
 export const VISUAL_STYLE = 'codex/visual-style.md';
 
@@ -29,7 +29,7 @@ const STYLE_PARTS = ['Medium', 'Palette', 'Period and setting', 'Light', 'Framin
 
 export function fixedTraits(markdown) {
   const section = sectionBody(markdown, 2, FIXED_TRAITS);
-  return section === null ? [] : bullets(section);
+  return section === null ? [] : bullets(section).map((b) => stripLabels(b).trim()).filter(Boolean);
 }
 
 // Names of the "### Variant: winter coat" subsections anywhere in the entry.
@@ -140,7 +140,7 @@ export function lookOf(text, variant = '') {
     }
   }
   const variantText = variant ? prose(sectionBody(desc ?? text, 3, `Variant: ${variant}`) ?? '') : '';
-  return { text: [base, variantText].filter(Boolean).join(' ').replace(/\n\n/g, ' '), cut };
+  return { text: stripLabels([base, variantText].filter(Boolean).join(' ').replace(/\n\n/g, ' ')), cut };
 }
 
 export const entryLook = (text, variant = '') => lookOf(text, variant).text;

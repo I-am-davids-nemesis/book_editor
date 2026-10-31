@@ -66,3 +66,9 @@ test('the short look is appearance only, inside the Description', () => {
   assert.match(look, /usual one/);
   assert.match(look, /nothing in manuscript\/ or outline\//);
 });
+
+test('gather leaves the look and image prompt empty when nothing visual is known', () => {
+  const p = gatherPrompt({ title: 'Gallaia', path: 'codex/locations/gallaia.md', kind: 'location' });
+  assert.match(p, /establish nothing visual about Gallaia/);
+  assert.equal(imagePromptFrom('# G\n\n## Description\n\nNothing yet.\n\n### Look\n\n### Image prompt\n\n### From the manuscript\n'), null);
+});

@@ -111,7 +111,7 @@ class BookView {
         back: () => this.open(this.tab, this.file?.path),
         run: (fn) => this.runOp(fn),
         upload: (files, of) => this.uploadImages(files, of),
-        refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path }),
+        refine: (img, entries) => this.askClaude(refinePrompt(entries, [img]), { open: entries[0].path, images: true }),
         visualStyle: () => this.openVisualStyle(),
         stage: (initial) => this.stage(initial),
       },
@@ -501,7 +501,7 @@ class BookView {
         gather: () => this.askClaude(gatherPrompt(entry)),
         traits: () => this.askClaude(fixedTraitsPrompt(entry)),
         look: () => this.askClaude(lookPrompt(entry)),
-        refine: (images) => this.askClaude(refinePrompt([entry], images)),
+        refine: (images) => this.askClaude(refinePrompt([entry], images), { images: true }),
         manuscript: () => this.askClaude(manuscriptPrompt(entry)),
       },
     }) : null);
@@ -547,14 +547,14 @@ class BookView {
 
   // Sends a prompt to the Claude panel, first opening `open` (a file) if
   // given, so the panel's context matches what the run is about.
-  askClaude(prompt, { open = null } = {}) {
+  askClaude(prompt, { open = null, images = false } = {}) {
     if (this.claude.runId) {
       toast('Claude is still working on the last request; stop it or wait, then try again', { error: true });
       return;
     }
     const send = () => {
       this.toggleClaude(true);
-      this.claude.send(prompt);
+      this.claude.send(prompt, { images });
     };
     if (open && (this.file?.path !== open || this.el.matches('.show-history, .show-lookbook'))) {
       this.afterRoute = send;

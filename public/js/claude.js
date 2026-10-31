@@ -146,7 +146,8 @@ export class ClaudePanel {
     })));
   }
 
-  async send(text = this.input.value) {
+  //   images: the run looks at images (the server runs it on Haiku)
+  async send(text = this.input.value, { images = false } = {}) {
     const prompt = text.trim();
     if (!prompt || this.runId) return;
     this.setRunning(true, 'Saving…');
@@ -155,7 +156,7 @@ export class ClaudePanel {
       return toast('Save failed, so Claude didn’t start. Fix the problem shown in the pane first.', { error: true });
     }
     try {
-      const { runId } = await api.claudeStart(this.bookId, { prompt, context: this.contextToSend() });
+      const { runId } = await api.claudeStart(this.bookId, { prompt, context: this.contextToSend(), images });
       this.input.value = '';
       this.renderQuick();
       this.logEl.querySelector('.claude-welcome')?.remove();
@@ -277,6 +278,7 @@ export class ClaudePanel {
       c.file && `Open: ${c.file}`,
       c.companion && `Beside: ${c.companion}`,
       c.selection && `Selection (${countWords(c.selection.text)} words)`,
+      e.model && `Model: ${e.model}`,
     ].filter(Boolean);
     this.logEl.append(h('div', { class: 'claude-msg claude-user' },
       h('div', { class: 'claude-prompt' }, e.prompt),

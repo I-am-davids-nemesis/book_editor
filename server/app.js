@@ -425,8 +425,9 @@ export function createApp({
   });
 
   claudeRoutes.post('/runs', async (req, res) => {
-    const { prompt, context, newSession } = req.body || {};
-    res.status(201).json(await claude.start(await bookRoot(req), { prompt, context, newSession }));
+    const { prompt, context, newSession, images } = req.body || {};
+    const imageModel = typeof req.config.claude?.imageModel === 'string' && req.config.claude.imageModel ? req.config.claude.imageModel : undefined;
+    res.status(201).json(await claude.start(await bookRoot(req), { prompt, context, newSession, images: images === true, imageModel }));
   });
 
   // The run's events from the start (or after Last-Event-ID), then live.
