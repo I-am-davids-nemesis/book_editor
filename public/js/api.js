@@ -39,6 +39,7 @@ export const api = {
   readFile: (id, path) => request('GET', `${book(id)}/file?path=${encodeURIComponent(path)}`),
   writeFile: (id, path, content, baseHash, force = false, opts) =>
     request('PUT', `${book(id)}/file`, { path, content, baseHash, force }, opts),
+  mentions: (id, entry) => request('GET', `${book(id)}/mentions?${new URLSearchParams({ entry })}`),
   search: (id, { query, caseSensitive, wholeWord, scope }) =>
     request('GET', `${book(id)}/search?${new URLSearchParams({ q: query, case: caseSensitive ? '1' : '0', word: wholeWord ? '1' : '0', scope })}`),
   checkpoint: (id, reason) => request('POST', `${book(id)}/checkpoint`, { reason }),

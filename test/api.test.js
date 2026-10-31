@@ -235,6 +235,15 @@ test('search over HTTP', async () => {
   assert.equal((await call('GET', '/api/books/sample/search?q=')).status, 400);
 });
 
+test('the scenes that name a codex entry, over HTTP', async () => {
+  const r = await call('GET', `/api/books/sample/mentions?entry=${encodeURIComponent('codex/locations/washing-house.md')}`);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.names, ['Washing House', 'Washing house']);
+  assert.deepEqual(r.data.scenes, []);
+  assert.equal((await call('GET', '/api/books/sample/mentions?entry=codex/nope.md')).status, 404);
+  assert.equal((await call('GET', '/api/books/sample/mentions')).status, 400);
+});
+
 test('lookbook images upload, serve and show in the tree', async () => {
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
   const up = await call('POST', '/api/books/sample/lookbook', { filename: 'tor.png', data: png, of: ['codex/characters/tor.md'] });

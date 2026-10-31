@@ -80,3 +80,23 @@ test('image prompts leave the style to the visual style note', () => {
   assert.doesNotMatch(gather, /style note if the book's codex has one/);
   assert.match(refinePrompt([tor], [{ path: 'lookbook/tor.png', title: 'Tor' }]), /not the image's medium or style: the editor adds codex\/visual-style\.md itself/);
 });
+
+test('gather reads only the scenes the editor found, when it found any', () => {
+  const found = {
+    names: ['Tor', 'Torrance'],
+    scenes: [
+      { chapter: 'One', title: 'The Opening', hits: 3, files: ['manuscript/01-one/01-the-opening.camera.md', 'manuscript/01-one/01-the-opening.third.md'] },
+      { chapter: 'One', title: 'Later', hits: 0, files: ['manuscript/01-one/02-later.md'] },
+    ],
+    tooMany: false,
+  };
+  const p = gatherPrompt(tor, found);
+  assert.match(p, /searched the manuscript for “Tor”, “Torrance”/);
+  assert.match(p, /- One, “The Opening”: manuscript\/01-one\/01-the-opening\.camera\.md, manuscript\/01-one\/01-the-opening\.third\.md/);
+  assert.match(p, /“Later” \(next to a scene that names it\)/);
+  assert.match(p, /Don't search the rest of the manuscript/);
+  assert.doesNotMatch(p, /every chapter and every narration mode/);
+  for (const none of [null, { names: ['Tor'], scenes: [], tooMany: true }]) {
+    assert.match(gatherPrompt(tor, none), /Find every passage in manuscript\/ \(every chapter and every narration mode\)/);
+  }
+});

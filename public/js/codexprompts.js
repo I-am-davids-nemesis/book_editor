@@ -46,11 +46,27 @@ const KIND_FOCUS = {
   note: 'anything visual or sensory',
 };
 
-// Claude reads the whole manuscript and writes the entry's Description.
-export function gatherPrompt(entry) {
+// Where Gather looks. With `found` (the editor's search for the entry's names,
+// from /mentions), Claude reads only those scenes; without it, or when the
+// search found nothing, Claude searches the whole manuscript.
+function gatherSources(entry, found) {
+  const focus = KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note;
+  if (!found?.scenes?.length) {
+    return `Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${focus}. Search for its other names too: the \`aliases:\` list in the entry's front matter, if it has one.`;
+  }
+  const scenes = found.scenes.map((s) => `   - ${s.chapter}, “${s.title}”${s.hits ? '' : ' (next to a scene that names it)'}: ${s.files.join(', ')}`).join('\n');
+  return `The editor searched the manuscript for ${found.names.map((n) => `“${n}”`).join(', ')}. These scenes name ${entry.title}, or come right before or after one that does. Each scene's files are the same scene in different narration modes; read them all:
+${scenes}
+
+   Find every passage in them that describes ${entry.title}: ${focus}. Don't search the rest of the manuscript; open another scene only to check a doubtful passage. If these scenes say little, say so under Open questions.`;
+}
+
+// Claude reads the manuscript (or the scenes in `found`) and writes the
+// entry's Description.
+export function gatherPrompt(entry, found = null) {
   return `Gather a description of “${entry.title}” (${entry.path}) from the manuscript.
 
-1. Find every passage in manuscript/ (every chapter and every narration mode) that describes ${entry.title}: ${KIND_FOCUS[entry.kind] ?? KIND_FOCUS.note}. Search for its other names too: the \`aliases:\` list in the entry's front matter, if it has one. Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context, and ${VISUAL_STYLE} if the book has one: keep what you describe within its period and setting, and away from what it says to avoid.
+1. ${gatherSources(entry, found)} Include indirect references (other names, titles, pronouns) when the scene makes clear who or what is meant. Also read ${entry.path} and the outline files for context, and ${VISUAL_STYLE} if the book has one: keep what you describe within its period and setting, and away from what it says to avoid.
 2. In ${entry.path}, write a "## ${DESCRIPTION}" section in exactly this shape, replacing the section if it already exists (up to the next "## " heading). Put it after the entry's opening lines if it's new. Leave every other part of the file alone.
 
 ${SECTION_FORMAT}

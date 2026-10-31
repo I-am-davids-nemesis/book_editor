@@ -22,6 +22,7 @@ import { providersFrom } from './imagegen/index.js';
 import { ImageJobs, MAX_IMAGES, SIZES } from './imagegen/jobs.js';
 import { buildImportMap } from './importmap.js';
 import { addImage, deleteImage, IMAGE_TYPES, isImagePath, updateImage } from './lookbook.js';
+import { entryScenes } from './mentions.js';
 import { resolveInBook } from './paths.js';
 import { serialized } from './queue.js';
 import { searchBook } from './search.js';
@@ -190,6 +191,11 @@ export function createApp({
     res.json(await searchBook(await bookRoot(req), {
       query: q, caseSensitive: caseSensitive === '1', wholeWord: word === '1', scope: scope || 'all',
     }));
+  });
+
+  // The scenes that name a codex entry, and their neighbors (for Gather).
+  api.get('/books/:id/mentions', async (req, res) => {
+    res.json(await entryScenes(await bookRoot(req), req.query.entry));
   });
 
   // Commits all changes in the book now, if there are any (the editor calls

@@ -498,13 +498,28 @@ class BookView {
       onAdd: (files) => this.uploadImages(files, [path]),
       onStage: () => this.stage(entry.kind === 'location' ? { location: path } : { characters: [path] }),
       claude: {
-        gather: () => this.askClaude(gatherPrompt(entry)),
+        gather: () => this.gather(entry),
         traits: () => this.askClaude(fixedTraitsPrompt(entry)),
         look: () => this.askClaude(lookPrompt(entry)),
         refine: (images) => this.askClaude(refinePrompt([entry], images), { images: true }),
         manuscript: () => this.askClaude(manuscriptPrompt(entry)),
       },
     }) : null);
+  }
+
+  // Gather: the editor finds the scenes that name the entry, so Claude reads
+  // only those. Saved first, so new aliases count.
+  async gather(entry) {
+    if (this.claude.runId) return this.askClaude('');
+    if (this.dirty && !(await this.save())) return;
+    let found;
+    try {
+      found = await api.mentions(this.id, entry.path);
+    } catch (err) {
+      toast(err.message, { error: true });
+      return;
+    }
+    this.askClaude(gatherPrompt(entry, found));
   }
 
   // The Stage dialog, for a picture of a moment. Entry texts come from the
