@@ -20,11 +20,18 @@ export const DEFAULT_MODEL = 'claude-opus-5-5';
 // picture shows, and much cheaper.
 export const DEFAULT_IMAGE_MODEL = 'claude-haiku-5-5';
 
-// The models a config asks for: claude.model and claude.imageModel, each
-// falling back to its default when missing or blank.
+// Gather's first reader, which copies passages out of scenes, is small too.
+export const DEFAULT_FINDER_MODEL = 'claude-haiku-5-5';
+
+// The models a config asks for: claude.model, claude.imageModel and
+// claude.finderModel, each falling back to its default when missing or blank.
 export function modelsFrom(config) {
   const pick = (v, fallback) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
-  return { model: pick(config?.claude?.model, DEFAULT_MODEL), imageModel: pick(config?.claude?.imageModel, DEFAULT_IMAGE_MODEL) };
+  return {
+    model: pick(config?.claude?.model, DEFAULT_MODEL),
+    imageModel: pick(config?.claude?.imageModel, DEFAULT_IMAGE_MODEL),
+    finderModel: pick(config?.claude?.finderModel, DEFAULT_FINDER_MODEL),
+  };
 }
 
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
@@ -83,8 +90,6 @@ export class ClaudeService {
     const readOnly = async (tool, input) => (READ_TOOLS.has(tool) && (await policy.decide(tool, input)).action === 'allow'
       ? { behavior: 'allow', updatedInput: input }
       : { behavior: 'deny', message: 'Only reading and searching inside the book is allowed here.' });
-    let text = '';
-    let result = null;
     try {
       const messages = this.query({
         prompt,
@@ -111,25 +116,53 @@ export class ClaudeService {
           abortController: abort,
         },
       });
-      for await (const msg of messages) {
-        if (msg.parent_tool_use_id) continue;
-        if (msg.type === 'assistant') {
-          const said = (msg.message?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-          if (said.trim()) text = said;
-        } else if (msg.type === 'result') {
-          if (msg.is_error) throw new Error(msg.errors?.join('\n') || msg.subtype || 'Claude stopped with an error');
-          result = msg.result;
-        }
-      }
+      return await finalAnswer(messages);
     } catch (err) {
       if (abort.signal.aborted) throw new HttpError(504, signal?.aborted ? 'Cancelled' : 'Claude took too long to answer');
-      throw new HttpError(502, friendlyError(err));
+      throw err instanceof HttpError ? err : new HttpError(502, friendlyError(err));
     } finally {
       clearTimeout(timer);
     }
-    const answer = (typeof result === 'string' && result.trim() ? result : text).trim();
-    if (!answer) throw new HttpError(502, 'Claude didn’t answer');
-    return answer;
+  }
+
+  // One answer to a prompt that carries everything Claude needs (text the
+  // editor put in it), with no tools and no Claude Code system prompt: for
+  // small-model chores such as copying passages out of scenes. Not limited to
+  // MAX_PROMPT, since the editor builds the prompt, not the writer.
+  async complete(root, prompt, { signal, model = DEFAULT_FINDER_MODEL, system = '', timeoutMs = ASK_TIMEOUT_MS } = {}) {
+    if (typeof prompt !== 'string' || !prompt.trim()) throw badRequest('Missing prompt');
+    const abort = new AbortController();
+    signal?.addEventListener('abort', () => abort.abort(), { once: true });
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
+    try {
+      const messages = this.query({
+        prompt,
+        options: {
+          cwd: root,
+          env: agentEnv(),
+          settingSources: [],
+          systemPrompt: system,
+          tools: [],
+          model,
+          permissionMode: 'default',
+          canUseTool: async () => ({ behavior: 'deny', message: 'No tools here.' }),
+          maxTurns: 1,
+          abortController: abort,
+        },
+      });
+      return await finalAnswer(messages);
+    } catch (err) {
+      if (abort.signal.aborted) throw new HttpError(504, signal?.aborted ? 'Cancelled' : 'Claude took too long to answer');
+      throw err instanceof HttpError ? err : new HttpError(502, friendlyError(err));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Files the editor prepares for a run (such as Gather's passages) live with
+  // the editor's config, not in the book; runs may read them.
+  scratchDir(root) {
+    return path.join(path.dirname(this.storeFile(root)), 'scratch', path.basename(this.storeFile(root), '.json'));
   }
 
   // Session ids and transcripts live with the editor's config, not in the book.
@@ -234,7 +267,7 @@ export class ClaudeService {
       }
     }
 
-    const policy = new Policy(root, store.extraTools);
+    const policy = new Policy(root, store.extraTools, [this.scratchDir(root)]);
     await policy.init();
     try {
       const messages = this.query({
@@ -437,9 +470,17 @@ class Run {
 // edits only inside it (never .git); Bash and web tools only when the book's
 // setting asks for them, and then each needs the writer's approval.
 class Policy {
-  constructor(root, extraTools) {
+  constructor(root, extraTools, readDirs = []) {
     this.root = path.resolve(root);
     this.extraTools = extraTools;
+    this.readDirs = readDirs.map((d) => path.resolve(d));
+  }
+
+  // A path in one of the extra folders runs may read (the editor's scratch).
+  readable(p) {
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return false;
+    const abs = path.resolve(p);
+    return this.readDirs.some((d) => abs.startsWith(d + path.sep));
   }
 
   async init() {
@@ -474,7 +515,7 @@ class Policy {
     if (READ_TOOLS.has(tool)) {
       const target = tool === 'Read' ? input.file_path : input.path;
       if (tool !== 'Read' && !target) return { action: 'allow' };
-      if (target === '.' || (await this.inBook(target))) return { action: 'allow' };
+      if (target === '.' || (await this.inBook(target)) || this.readable(target)) return { action: 'allow' };
       return { action: 'ask' };
     }
     if (WRITE_TOOLS.has(tool)) {
@@ -534,6 +575,26 @@ export function buildPrompt(prompt, context = {}) {
   }
   if (!lines.length) return prompt;
   return `<editor-context>\n${lines.join('\n')}\n</editor-context>\n\n${prompt}`;
+}
+
+// The final answer in an SDK message stream: the result, or else the last
+// thing Claude said.
+async function finalAnswer(messages) {
+  let text = '';
+  let result = null;
+  for await (const msg of messages) {
+    if (msg.parent_tool_use_id) continue;
+    if (msg.type === 'assistant') {
+      const said = (msg.message?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+      if (said.trim()) text = said;
+    } else if (msg.type === 'result') {
+      if (msg.is_error) throw new Error(msg.errors?.join('\n') || msg.subtype || 'Claude stopped with an error');
+      result = msg.result;
+    }
+  }
+  const answer = (typeof result === 'string' && result.trim() ? result : text).trim();
+  if (!answer) throw new HttpError(502, 'Claude didn’t answer');
+  return answer;
 }
 
 // --- describing tool calls -------------------------------------------------------

@@ -507,19 +507,34 @@ class BookView {
     }) : null);
   }
 
-  // Gather: the editor finds the scenes that name the entry, so Claude reads
-  // only those. Saved first, so new aliases count.
+  // Gather: the editor finds the scenes that name the entry, a small model
+  // copies the passages that describe it out of them, and Claude writes the
+  // Description from those. If the first reader fails, Claude reads the
+  // scenes itself. Saved first, so new aliases count.
   async gather(entry) {
     if (this.claude.runId) return this.askClaude('');
+    if (this.gathering) return toast('Still finding passages for the last Gather');
     if (this.dirty && !(await this.save())) return;
+    toast(`Finding passages about ${entry.title}…`, { ms: 10 * 60 * 1000 });
     let found;
+    let passages = null;
+    this.gathering = true;
     try {
-      found = await api.mentions(this.id, entry.path);
+      passages = await api.claudePassages(this.id, entry.path);
+      found = passages.found;
     } catch (err) {
-      toast(err.message, { error: true });
-      return;
+      toast(`The first reader failed (${err.message}); Claude will read the scenes itself`, { error: true });
+      try {
+        found = await api.mentions(this.id, entry.path);
+      } catch (err2) {
+        toast(err2.message, { error: true });
+        return;
+      }
+    } finally {
+      this.gathering = false;
     }
-    this.askClaude(gatherPrompt(entry, found));
+    if (passages?.file) toast(`${passages.count} passages found${passages.failed ? `; ${passages.failed} batches of scenes couldn't be read` : ''}`);
+    this.askClaude(gatherPrompt(entry, found, passages));
   }
 
   // The Stage dialog, for a picture of a moment. Entry texts come from the

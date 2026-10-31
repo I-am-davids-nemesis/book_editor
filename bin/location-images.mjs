@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pictures of every place in a book: for each codex location, gather a
-// description from the manuscript if it has none (the editor's Gather, run by
-// Claude), then generate candidate images of the place on this Mac with
+// description from the manuscript if it has none (the editor's Gather: a
+// small model copies out the passages, then Claude writes it), then generate candidate images of the place on this Mac with
 // ComfyUI. The candidates wait in the Lookbook's Candidates view to be kept or
 // discarded, like any made from the Stage dialog.
 //
@@ -33,7 +33,7 @@ import { configPath, loadConfig } from '../server/config.js';
 import { providersFrom } from '../server/imagegen/index.js';
 import { ImageJobs, MAX_IMAGES, SIZES } from '../server/imagegen/jobs.js';
 import { listLookbook } from '../server/lookbook.js';
-import { entryScenes } from '../server/mentions.js';
+import { findPassages } from '../server/passages.js';
 import { DESCRIPTION, gatherPrompt } from '../public/js/codexprompts.js';
 import { sectionBody } from '../public/js/sections.js';
 import { handoffPrompt, isReference, rankImages, VISUAL_STYLE } from '../public/js/worldmodel.js';
@@ -77,9 +77,11 @@ async function locations(root) {
 
 // One Gather run, headless: Claude reads the manuscript and writes the
 // Description. Anything that would need the writer's approval is refused.
-async function gather(claude, root, rel, title, model) {
+async function gather(claude, root, rel, title, { model, finderModel }) {
   const entry = { path: rel, title, kind: 'location' };
-  const { runId } = await claude.start(root, { prompt: gatherPrompt(entry, await entryScenes(root, rel)), newSession: true, model });
+  const passages = await findPassages(claude, root, rel, { model: finderModel });
+  console.log(`  ${passages.file ? `${passages.count} passages from ${passages.found.scenes.length} scenes` : 'no scenes found; Claude searches on its own'}`);
+  const { runId } = await claude.start(root, { prompt: gatherPrompt(entry, passages.found, passages), newSession: true, model });
   const run = claude.run(runId, root);
   let text = '';
   const errors = [];
@@ -169,7 +171,7 @@ async function main() {
       }
       console.log('  gathering a description from the manuscript (Claude)…');
       try {
-        const said = await gather(claude, root, rel, title, modelsFrom(config).model);
+        const said = await gather(claude, root, rel, title, modelsFrom(config));
         if (said) console.log(said.split('\n').map((l) => `    ${l}`).join('\n'));
       } catch (err) {
         console.log(`  gathering failed: ${err.message}`);

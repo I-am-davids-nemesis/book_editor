@@ -46,7 +46,7 @@ function scenesInOrder(tree, mode) {
 // model is involved; Gather reads only these. The book's `gather.mode` in
 // book.json (a narration mode, such as "rotating-third") limits each scene
 // to that mode's file.
-//   { names, mode, scenes: [{ chapter, title, files, hits }], tooMany }
+//   { title, kind, names, mode, scenes: [{ chapter, title, files, hits }], tooMany }
 // `hits` counts the names in the scene's files; 0 marks a neighbor. When more
 // than MAX_SCENES would be listed, `scenes` is empty and `tooMany` is true.
 export async function entryScenes(root, entryPath) {
@@ -68,8 +68,9 @@ export async function entryScenes(root, entryPath) {
   hits.forEach((n, i) => {
     if (n) for (const j of [i - 1, i, i + 1]) if (j >= 0 && j < scenes.length) keep.add(j);
   });
-  if (keep.size > MAX_SCENES) return { names, mode: mode || null, scenes: [], tooMany: true };
-  return { names, mode: mode || null, scenes: [...keep].sort((a, b) => a - b).map((i) => {
+  const about = { title: found.title, kind: found.kind, names, mode: mode || null };
+  if (keep.size > MAX_SCENES) return { ...about, scenes: [], tooMany: true };
+  return { ...about, scenes: [...keep].sort((a, b) => a - b).map((i) => {
     const { all, ...scene } = scenes[i];
     return { ...scene, hits: hits[i] };
   }), tooMany: false };

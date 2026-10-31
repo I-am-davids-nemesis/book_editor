@@ -23,6 +23,7 @@ import { ImageJobs, MAX_IMAGES, SIZES } from './imagegen/jobs.js';
 import { buildImportMap } from './importmap.js';
 import { addImage, deleteImage, IMAGE_TYPES, isImagePath, updateImage } from './lookbook.js';
 import { entryScenes } from './mentions.js';
+import { findPassages } from './passages.js';
 import { resolveInBook } from './paths.js';
 import { serialized } from './queue.js';
 import { searchBook } from './search.js';
@@ -420,6 +421,14 @@ export function createApp({
     const abort = new AbortController();
     res.on('close', () => { if (!res.writableFinished) abort.abort(); });
     res.json({ text: await claude.ask(await bookRoot(req), req.body?.prompt, { signal: abort.signal, model: modelsFrom(req.config).model }) });
+  });
+
+  // Gather's first reader: copies an entry's passages out of the scenes that
+  // name it into a scratch file the Gather run then reads.
+  claudeRoutes.post('/passages', async (req, res) => {
+    const abort = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) abort.abort(); });
+    res.json(await findPassages(claude, await bookRoot(req), req.body?.entry, { signal: abort.signal, model: modelsFrom(req.config).finderModel }));
   });
 
   claudeRoutes.delete('/session', async (req, res) => {

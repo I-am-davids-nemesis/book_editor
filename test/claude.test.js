@@ -167,9 +167,45 @@ test('runs that look at images use the image model; others the pinned model', as
   assert.equal(starts.at(-1).model, 'claude-other', 'the panel can show which model ran');
 });
 
-test('modelsFrom reads claude.model and claude.imageModel, with defaults', () => {
-  assert.deepEqual(modelsFrom({}), { model: 'claude-opus-5-5', imageModel: 'claude-haiku-5-5' });
-  assert.deepEqual(modelsFrom({ claude: { model: ' claude-x ', imageModel: '' } }), { model: 'claude-x', imageModel: 'claude-haiku-5-5' });
+test('modelsFrom reads claude.model, imageModel and finderModel, with defaults', () => {
+  assert.deepEqual(modelsFrom({}), { model: 'claude-opus-5-5', imageModel: 'claude-haiku-5-5', finderModel: 'claude-haiku-5-5' });
+  assert.deepEqual(modelsFrom({ claude: { model: ' claude-x ', imageModel: '', finderModel: 'claude-y' } }),
+    { model: 'claude-x', imageModel: 'claude-haiku-5-5', finderModel: 'claude-y' });
+});
+
+test('complete answers with no tools, on the small model', async () => {
+  const root = await tempDir();
+  let denied;
+  const { claude, calls } = await service(async function* (options) {
+    denied = (await options.canUseTool('Read', { file_path: path.join(root, 'x.md') }, {})).behavior;
+    yield { ...result, result: ' [] ' };
+  });
+  assert.equal(await claude.complete(root, 'x'.repeat(50000), { system: 'Copy passages.' }), '[]', 'not limited to MAX_PROMPT');
+  const { options } = calls[0];
+  assert.deepEqual(options.tools, []);
+  assert.equal(options.model, 'claude-haiku-5-5');
+  assert.equal(options.systemPrompt, 'Copy passages.');
+  assert.deepEqual(options.settingSources, []);
+  assert.equal(options.maxTurns, 1);
+  assert.equal(denied, 'deny');
+});
+
+test('runs may read the editor\'s scratch files for the book, and nothing else outside it', async () => {
+  const root = await gitBook(SAMPLE_BOOK);
+  const decisions = [];
+  const { claude } = await service(async function* (options) {
+    for (const p of [path.join(claude.scratchDir(root), 'passages-x.md'), path.join(path.dirname(claude.scratchDir(root)), 'other', 'y.md')]) {
+      decisions.push((await options.canUseTool('Read', { file_path: p }, {})).behavior);
+    }
+    yield result;
+  });
+  // The second read would need the writer's approval; refuse it.
+  const { runId } = await claude.start(root, { prompt: 'Read' });
+  const run = claude.run(runId, root);
+  run.subscribe((e) => { if (e?.type === 'permission') run.answer(e.requestId, false); });
+  await run.done;
+  assert.deepEqual(decisions, ['allow', 'deny']);
+  assert.ok(!claude.scratchDir(root).startsWith(root), 'scratch files are not in the book');
 });
 
 test('approval requests round-trip through the panel', async () => {
