@@ -1,10 +1,21 @@
 import { api } from './api.js';
 import { renderMarkdown } from './pane.js';
 import { ANSWERS_START, answersMessage, initialAnswer, isAnswered, parseQuestion, questionLabel, questionsIn } from './questions.js';
+import { isNewWork, workOf } from './tree.js';
 import { h, showMenu, toast } from './ui.js';
 import { countWords } from './wordcount.js';
 
 const STATUS_LABELS = { A: 'new', M: 'edited', D: 'deleted', R: 'renamed' };
+export const WRAP_UP_START = 'Before we move on:';
+
+// Asked of the old conversation before the panel starts a fresh one for a
+// new scene or chapter.
+export function wrapUpPrompt(from, to) {
+  return `${WRAP_UP_START} the next prompt is about ${to}, so this conversation about ${from} is about to be cleared, and nothing said only here will survive it. `
+    + 'Record every decision we made in it that isn\'t in the files yet, as AGENTS.md says under "Recording decisions". '
+    + 'Don\'t draft or revise prose now. Reply with one short line per file you changed, or "Nothing new to record."';
+}
+
 const EXTRA_TOOLS = {
   off: 'Bash and web tools: off',
   ask: 'Bash and web tools: ask each time',
@@ -14,6 +25,10 @@ const EXTRA_TOOLS = {
 // prompt box with chips for what's attached (the open file, the file beside
 // it, the selection), approval cards, Stop and New conversation. The run
 // itself happens on the server; this follows its events.
+//
+// A conversation belongs to one scene or chapter (that of the files sent with
+// its prompts). Sending from another one first asks Claude to record the
+// conversation's decisions in the files, then starts a fresh conversation.
 //
 //   getContext() -> { file, companion, selection, mode, modes }
 //     file / companion: { path, label } or null; selection: { path, text } or null
@@ -32,6 +47,8 @@ export class ClaudePanel {
     this.extraTools = 'off';
     this.excluded = new Set(); // chips switched off for the current files
     this.contextKey = '';
+    this.work = null; // { chapter, scene, path } the conversation is about
+    this.lastDone = null; // the last run's done event
     this.resetRender();
 
     this.statusEl = h('span', { class: 'claude-status' });
@@ -104,6 +121,7 @@ export class ClaudePanel {
       this.extraTools = data.extraTools;
       this.logEl.replaceChildren();
       this.resetRender();
+      this.work = null;
       for (const e of data.entries) this.render(e, { live: false });
       if (!data.entries.length) this.showWelcome();
       if (data.running) this.follow(data.running);
@@ -122,14 +140,42 @@ export class ClaudePanel {
   async newConversation() {
     if (this.runId) return toast('Claude is still working; stop it first', { error: true });
     try {
-      await api.claudeClear(this.bookId);
-      this.logEl.replaceChildren();
-      this.resetRender();
+      await this.forget();
       this.showWelcome();
       this.input.focus();
     } catch (err) {
       toast(err.message, { error: true });
     }
+  }
+
+  async forget() {
+    await api.claudeClear(this.bookId);
+    this.logEl.replaceChildren();
+    this.resetRender();
+    this.work = null;
+  }
+
+  // Before a prompt about a new scene or chapter: has the old conversation
+  // record its decisions, then forgets it. Resolves false (keeping the
+  // conversation) if that run fails or is stopped.
+  async wrapUp(from, to) {
+    toast(`New ${from.chapter === to.chapter ? 'scene' : 'chapter'}: Claude records this conversation’s decisions, then starts fresh`);
+    const ended = await this.send(wrapUpPrompt(from.path, to.path), { context: {}, checkWork: false, waitForEnd: true });
+    if (!ended || !this.lastDone?.ok) {
+      toast('Claude didn’t finish recording decisions, so the conversation was kept. Send again to retry, or use New conversation.', { error: true });
+      return false;
+    }
+    const reply = this.replyEls.at(-1)?.markdown?.trim();
+    try {
+      await this.forget();
+    } catch (err) {
+      toast(err.message, { error: true });
+      return false;
+    }
+    this.logEl.append(h('div', { class: 'claude-msg claude-assistant claude-md muted' },
+      h('p', {}, `Recorded before leaving ${from.path}:`),
+      reply ? renderMarkdown(reply) : null));
+    return true;
   }
 
   showSettings(anchor) {
@@ -148,10 +194,17 @@ export class ClaudePanel {
   }
 
   //   images: the run looks at images (the server runs it on Haiku)
-  // Resolves true once the run has started.
-  async send(text = this.input.value, { images = false } = {}) {
+  //   context: what to attach instead of the chips'
+  //   checkWork: false skips the new-scene wrap-up
+  //   waitForEnd: resolve once the run ends, not once it starts
+  // Resolves true once the run has started (or ended).
+  async send(text = this.input.value, { images = false, context, checkWork = true, waitForEnd = false } = {}) {
     const prompt = text.trim();
     if (!prompt || this.runId) return false;
+    const typed = text === this.input.value;
+    context ??= this.contextToSend();
+    const to = checkWork ? this.workIn(context) : null;
+    if (to && isNewWork(this.work, to) && !(await this.wrapUp(this.work, to))) return false;
     this.setRunning(true, 'Saving…');
     if (!(await this.beforeRun())) {
       this.setRunning(false);
@@ -159,11 +212,14 @@ export class ClaudePanel {
       return false;
     }
     try {
-      const { runId } = await api.claudeStart(this.bookId, { prompt, context: this.contextToSend(), images });
-      this.input.value = '';
-      this.renderQuick();
+      const { runId } = await api.claudeStart(this.bookId, { prompt, context, images });
+      if (typed) {
+        this.input.value = '';
+        this.renderQuick();
+      }
       this.logEl.querySelector('.claude-welcome')?.remove();
-      this.follow(runId);
+      const ended = this.follow(runId);
+      if (waitForEnd) await ended;
       return true;
     } catch (err) {
       this.setRunning(false);
@@ -182,11 +238,24 @@ export class ClaudePanel {
     }
   }
 
+  // The scene or chapter of the files a prompt is sent with, if any.
+  workIn(context) {
+    for (const path of [context.file, context.companion, context.selection?.path]) {
+      const work = workOf(path);
+      if (work) return { ...work, path };
+    }
+    return null;
+  }
+
   // Follows a run's events. The browser reconnects by itself after a blip,
-  // and the server resumes after the last event seen.
+  // and the server resumes after the last event seen. Resolves when the run
+  // ends.
   follow(runId) {
     this.source?.close();
     this.runId = runId;
+    this.lastDone = null;
+    let ended;
+    const done = new Promise((resolve) => { ended = resolve; });
     this.setRunning(true);
     const source = new EventSource(api.claudeEventsUrl(this.bookId, runId));
     this.source = source;
@@ -204,6 +273,7 @@ export class ClaudePanel {
         this.runId = null;
         this.setRunning(false);
       }
+      ended();
     };
     source.addEventListener('end', end);
     source.onerror = () => {
@@ -214,6 +284,7 @@ export class ClaudePanel {
         this.loadSession();
       }
     };
+    return done;
   }
 
   setRunning(on, label = 'Working…') {
@@ -242,6 +313,7 @@ export class ClaudePanel {
         this.replyEls = [];
         if (e.prompt.startsWith(ANSWERS_START)) this.questionsBar?.markSent();
         this.questionsBar = null;
+        if (!e.prompt.startsWith(WRAP_UP_START)) this.work = this.workIn(e.context || {}) || this.work;
         this.renderStart(e);
         break;
       case 'text': this.renderText(e.text, live); break;
@@ -273,6 +345,7 @@ export class ClaudePanel {
         if (typeof e.cost === 'number') parts.push(`$${e.cost.toFixed(e.cost < 0.1 ? 3 : 2)}`);
         if (e.turns) parts.push(`${e.turns} turn${e.turns === 1 ? '' : 's'}`);
         this.logEl.append(h('div', { class: 'claude-done muted' }, parts.join(' · ')));
+        if (live) this.lastDone = e;
         this.renderQuestions();
         break;
       }
@@ -344,7 +417,7 @@ export class ClaudePanel {
           toast('Claude is still working; send your answers when it’s done', { error: true });
           return false;
         }
-        return this.send(message);
+        return this.send(message, { checkWork: false });
       },
     });
     bar.markSent = () => bar.replaceChildren(h('span', { class: 'muted' }, 'Answers sent'),

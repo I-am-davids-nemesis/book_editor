@@ -30,6 +30,23 @@ export function sceneFiles(scene) {
   return [...(scene.hasBase ? [scene.manuscriptPath] : []), ...scene.variants.map((v) => v.path)];
 }
 
+// What a manuscript or outline path is about, for the Claude panel's one
+// conversation per scene or chapter: { chapter, scene } (scene is '' for a
+// chapter's plot file), or null for any other file. Modes share a scene.
+export function workOf(path) {
+  const m = /^(?:manuscript|outline)\/([^/]+)\/([^/.]+)(?:\.[^/]+)?\.md$/i.exec(path || '');
+  if (!m) return null;
+  return { chapter: m[1], scene: m[2] === '_chapter' ? '' : m[2] };
+}
+
+// Whether moving from one to the other is a new scene or chapter. A chapter's
+// plot file goes with any of its scenes.
+export function isNewWork(from, to) {
+  if (!from || !to) return false;
+  if (from.chapter !== to.chapter) return true;
+  return Boolean(from.scene && to.scene && from.scene !== to.scene);
+}
+
 // The scene (and chapter) that a manuscript path belongs to, if any.
 export function findScene(tree, path) {
   for (const ch of tree.chapters) {

@@ -47,7 +47,8 @@ const MAX_ENTRIES = 2000;
 
 const SYSTEM_APPEND = `You are helping a writer with a novel, from a panel inside their book editor.
 The book is plain Markdown in git: manuscript/ holds scenes (pure prose, no front matter), outline/ mirrors it with one plot file per scene, codex/ holds characters, locations and notes (an entry may start with front matter whose aliases: list gives its other names; keep it when you edit). AGENTS.md has the book's conventions.
-Files you change reload in the writer's open panes, and the editor commits your changes when you finish. Change only files inside this book. Keep answers in the panel short; the work belongs in the files.`;
+Files you change reload in the writer's open panes, and the editor commits your changes when you finish. Change only files inside this book. Keep answers in the panel short; the work belongs in the files.
+Each scene or chapter gets a fresh conversation, so a decision that matters later belongs in the files, not only in the panel.`;
 
 // Runs use your Claude Code login. An ANTHROPIC_API_KEY in the shell that
 // started the editor would take precedence over it (and is often a stale key

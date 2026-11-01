@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildTree } from '../server/tree.js';
-import { companionOf, setFileWords } from '../public/js/tree.js';
+import { companionOf, isNewWork, setFileWords, workOf } from '../public/js/tree.js';
 import { tempDir, writeFiles } from './helpers.js';
 
 async function modesBook() {
@@ -53,4 +53,21 @@ test('setFileWords matches what the server would count', async () => {
   assert.equal(tree.words, expected.words);
   assert.deepEqual(tree.chapters.map((c) => [c.words, c.wordsByMode]), expected.chapters.map((c) => [c.words, c.wordsByMode]));
   assert.deepEqual(tree.chapters[0].scenes[0].variants, expected.chapters[0].scenes[0].variants);
+});
+
+test('workOf and isNewWork tell when the Claude panel moves to a new scene or chapter', () => {
+  assert.deepEqual(workOf('manuscript/01-a/02-two.camera.md'), { chapter: '01-a', scene: '02-two' });
+  assert.deepEqual(workOf('outline/01-a/02-two.md'), { chapter: '01-a', scene: '02-two' });
+  assert.deepEqual(workOf('outline/01-a/_chapter.md'), { chapter: '01-a', scene: '' });
+  assert.equal(workOf('codex/characters/tor.md'), null);
+  assert.equal(workOf(null), null);
+  const at = (p) => workOf(p);
+  assert.equal(isNewWork(at('manuscript/01-a/01-one.md'), at('outline/01-a/01-one.md')), false);
+  assert.equal(isNewWork(at('manuscript/01-a/01-one.camera.md'), at('manuscript/01-a/01-one.rotating-third.md')), false);
+  assert.equal(isNewWork(at('manuscript/01-a/01-one.md'), at('manuscript/01-a/02-two.md')), true);
+  assert.equal(isNewWork(at('outline/01-a/_chapter.md'), at('manuscript/01-a/02-two.md')), false);
+  assert.equal(isNewWork(at('manuscript/01-a/02-two.md'), at('outline/01-a/_chapter.md')), false);
+  assert.equal(isNewWork(at('outline/01-a/_chapter.md'), at('outline/02-b/_chapter.md')), true);
+  assert.equal(isNewWork(at('manuscript/01-a/01-one.md'), at('codex/characters/tor.md')), false);
+  assert.equal(isNewWork(null, at('manuscript/01-a/01-one.md')), false);
 });
